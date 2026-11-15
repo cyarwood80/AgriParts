@@ -1,0 +1,14 @@
+{
+  "supplier": "ACMUK",
+  "make": "ACM",
+  "format": {
+    "fixedWidth": {
+      "part_number": [0, 15],
+      "description": [15, 40],
+      "list_price": [55, 9],
+      "net_price": [64, 9],
+      "discount_code": [73, 1]
+    }
+  },
+  "price_divisor": 100
+}

@@ -1,0 +1,40 @@
+{
+  "name": "agriparts",
+  "version": "2.0.0-alpha.1",
+  "private": true,
+  "description": "API-first, MCP-native parts & stock platform for UK machinery dealerships",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "mcp:stdio": "tsx src/mcp/stdio.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate-cli.ts",
+    "db:seed": "tsx src/db/seed-cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.16",
+    "@fastify/swagger": "^9.9.4",
+    "@fastify/swagger-ui": "^6.1.4",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "drizzle-orm": "^0.45.4",
+    "fastify": "^5.12.8",
+    "fastify-type-provider-zod": "^7.0.0",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.0",
+    "tsx": "^4.23.0",
+    "vitest": "^4.0.0",
+    "drizzle-kit": "*",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0"
+  }
+}

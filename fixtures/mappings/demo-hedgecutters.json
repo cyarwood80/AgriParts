@@ -1,0 +1,13 @@
+{
+  "supplier": "DHC",
+  "make": "DH",
+  "columns": {
+    "part_number": "Part No",
+    "description": "Description",
+    "list_price": "RRP (£)",
+    "net_price": "Dealer Net (£)",
+    "supersedes": "Replaces",
+    "pack_qty": "Pack"
+  },
+  "skip_if_description_matches": "^(DISCONTINUED|DO NOT USE)"
+}
