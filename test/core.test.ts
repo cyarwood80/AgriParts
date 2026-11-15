@@ -99,6 +99,24 @@ describe('order lifecycle', () => {
     expect((await getOrder(ctx, q.number)).status).toBe('cancelled');
   });
 
+  it('concurrent confirmations never oversell the last units', async () => {
+    const ctx = env.ctx();
+    const s = await free('ACM-30553', 'NTH');
+    const n = Math.max(1, s.available);
+    if (s.available < 1) await adjustStock(ctx, { partNumber: 'ACM-30553', depotCode: 'NTH', delta: 1, reason: 'test setup' });
+    const quotes = await Promise.all(
+      Array.from({ length: n + 3 }, () => createQuote(ctx, { customerAccount: 'BRK01', depotCode: 'NTH', lines: [{ partNumber: 'ACM-30553', qty: 1 }] })),
+    );
+    const confirmed = await Promise.all(quotes.map((q) => confirmOrder(ctx, q.number)));
+    const allocated = confirmed.reduce((t, o) => t + o.lines[0]!.qtyAllocated, 0);
+    const backordered = confirmed.reduce((t, o) => t + o.lines[0]!.qtyBackordered, 0);
+    expect(allocated).toBe(n);
+    expect(backordered).toBe(3);
+    const after = await free('ACM-30553', 'NTH');
+    expect(after.available).toBe(0);
+    for (const q of quotes) await cancelOrder(ctx, q.number, 'test cleanup');
+  });
+
   it('enforces scopes', async () => {
     const ro = env.ctx(['parts:read', 'orders:read']);
     await expect(createQuote(ro, { customerAccount: 'HILL01', depotCode: 'HQ', lines: [{ partNumber: 'GEN-GR-400', qty: 1 }] })).rejects.toBeInstanceOf(AppError);

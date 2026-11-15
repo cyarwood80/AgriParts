@@ -16,7 +16,8 @@
     "db:seed": "tsx src/db/seed-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:pg": "TEST_PG_URL=${TEST_PG_URL:-postgres://postgres@127.0.0.1:55432/postgres} vitest run"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",
