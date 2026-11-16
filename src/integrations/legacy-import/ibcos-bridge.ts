@@ -19,22 +19,27 @@
 import { createHash } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { customers, depots, ingestBatches, ingestIssues, parts, stockLevels } from '../../db/schema.js';
+import { customers, depots, ingestBatches, ingestIssues, machineModels, machines, parts, partSalesHistory, stockLevels } from '../../db/schema.js';
 import { parseCsv } from '../../lib/csv.js';
 import { AppError } from '../../lib/errors.js';
 import { parsePounds } from '../../lib/money.js';
 import { normalisePartNumber } from '../../lib/part-number.js';
 import { audit, emitEvent, type ServiceContext } from '../../services/context.js';
+import { ensureDataSource, markLoaded } from '../../services/data-sources.js';
 import { lockStock, recordMovement } from '../../services/stock.js';
 
 export const IBCOS_PLACEHOLDER_MAPPINGS = {
   customers: { account_code: 'Account', name: 'Name', postcode: 'Postcode', phone: 'Telephone', email: 'Email', price_band: 'Price Band', on_stop: 'On Stop' },
   parts: { make: 'Franchise', part_number: 'Part Number', description: 'Description', list_price: 'Retail', cost_price: 'Cost', discount_code: 'Disc Code', bin: 'Bin' },
   stock: { depot: 'Depot', make: 'Franchise', part_number: 'Part Number', on_hand: 'Free Stock', bin: 'Bin', min_qty: 'Min', max_qty: 'Max' },
+  /** Wholegoods register: the machines customers own. */
+  machines: { serial: 'Serial No', make: 'Make', model: 'Model', account_code: 'Account', year: 'Year', hours: 'Hours', reg_no: 'Reg No', kind: 'Type' },
+  /** Parts sales lines (invoice history). */
+  sales_history: { invoice_ref: 'Invoice No', line_no: 'Line', invoiced_on: 'Invoice Date', account_code: 'Account', serial: 'Serial No', make: 'Franchise', part_number: 'Part Number', qty: 'Qty', net: 'Net Value' },
 } as const;
 
 export const LegacyImportSchema = z.object({
-  entity: z.enum(['customers', 'parts', 'stock']),
+  entity: z.enum(['customers', 'parts', 'stock', 'machines', 'sales_history']),
   mode: z.enum(['opening', 'sync']).default('sync'),
   /** Field -> column header. Defaults to the (unconfirmed) Ibcos placeholders. */
   columns: z.record(z.string(), z.string()).optional(),
@@ -80,7 +85,10 @@ export async function importLegacyFile(
     const i = header.indexOf(col);
     if (i >= 0) idx[field] = i;
   }
-  const required = { customers: ['account_code', 'name'], parts: ['part_number', 'description'], stock: ['part_number', 'on_hand', 'depot'] }[opts.entity];
+  const required = {
+    customers: ['account_code', 'name'], parts: ['part_number', 'description'], stock: ['part_number', 'on_hand', 'depot'],
+    machines: ['serial', 'model'], sales_history: ['invoice_ref', 'invoiced_on', 'part_number', 'qty'],
+  }[opts.entity];
   const missing = required.filter((f) => idx[f] === undefined);
   if (missing.length) {
     throw new AppError('VALIDATION', `File is missing required columns for ${opts.entity}: ${missing.map((f) => `${f} ("${columns[f]}")`).join(', ')}`, { header, expected: columns });
@@ -95,16 +103,23 @@ export async function importLegacyFile(
   const stats = { rows: records.length, created: 0, updated: 0, unchanged: 0, skipped: 0, stockDelta: 0 };
 
   return ctx.transaction(async (tx) => {
+    const source = await ensureDataSource(tx, { code: 'ibcos-gold', kind: 'dms_export', name: 'Ibcos Gold exports' });
     const [batch] = await tx.db
       .insert(ingestBatches)
       .values({
-        tenantId: ctx.tenantId, kind, source: 'ibcos-gold', sourceName: input.sourceName, checksum,
+        tenantId: ctx.tenantId, kind, source: 'ibcos-gold', dataSourceId: source.id, sourceName: input.sourceName, checksum,
         mapping: { ...opts, columns } as Record<string, unknown>, rowCount: records.length, status: 'running', actor: ctx.actorLabel,
       })
       .returning();
     const batchId = batch!.id;
     const depotRows = await tx.db.select().from(depots).where(eq(depots.tenantId, ctx.tenantId));
     const depotByCode = new Map(depotRows.map((d) => [d.code, d]));
+    const custByCode = new Map<string, string>();
+    const modelByKey = new Map<string, string>();
+    if (opts.entity === 'machines' || opts.entity === 'sales_history') {
+      for (const c of await tx.db.select({ id: customers.id, code: customers.accountCode }).from(customers).where(eq(customers.tenantId, ctx.tenantId))) custByCode.set(c.code, c.id);
+      for (const m of await tx.db.select().from(machineModels).where(eq(machineModels.tenantId, ctx.tenantId))) modelByKey.set(`${m.make}|${m.model.toUpperCase()}`, m.id);
+    }
 
     for (const r of records) {
       try {
@@ -126,6 +141,15 @@ export async function importLegacyFile(
             await tx.db.insert(customers).values({ ...values, tenantId: ctx.tenantId, accountCode: code });
             stats.created++;
           }
+          continue;
+        }
+
+        if (opts.entity === 'machines') {
+          stats[await upsertMachine(tx, r, opts.defaultMake, custByCode, modelByKey, issues)]++;
+          continue;
+        }
+        if (opts.entity === 'sales_history') {
+          stats[await insertSalesLine(tx, r, batchId, opts.defaultMake, custByCode, issues)]++;
           continue;
         }
 
@@ -207,6 +231,7 @@ export async function importLegacyFile(
       throw new DryRunResult({ batchId: null, dryRun: true, summary, issues });
     }
     await tx.db.update(ingestBatches).set({ status: 'loaded', summary, finishedAt: new Date() }).where(eq(ingestBatches.id, batchId));
+    await markLoaded(tx, source.id);
     await audit(tx, `${kind}.loaded`, 'ingest_batch', batchId, summary);
     await emitEvent(tx, 'legacy_import.loaded', 'ingest_batch', batchId, { entity: opts.entity, mode: opts.mode, sourceName: input.sourceName, ...summary });
     return { batchId, dryRun: false, summary, issues };
@@ -214,6 +239,111 @@ export async function importLegacyFile(
     if (e instanceof DryRunResult) return e.result;
     throw e;
   });
+}
+
+type Row = { rowNo: number; get: (f: string) => string | undefined; raw: Record<string, unknown> };
+type Outcome = 'created' | 'updated' | 'unchanged' | 'skipped';
+
+/** dd/mm/yyyy (UK DMS exports), dd-mm-yyyy or ISO yyyy-mm-dd -> ISO date, else null. */
+export function parseUkDate(s: string): string | null {
+  const t = s.trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/.exec(t);
+  if (!m) return null;
+  const [d, mo, yRaw] = [Number(m[1]), Number(m[2]), m[3]!];
+  const y = yRaw.length === 2 ? 2000 + Number(yRaw) : Number(yRaw);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const iso = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  return new Date(`${iso}T00:00:00Z`).toISOString().slice(0, 10) === iso ? iso : null;
+}
+
+const intOrNull = (s: string | undefined) => {
+  if (!s) return null;
+  const n = Number(s.replace(/,/g, ''));
+  return Number.isInteger(n) ? n : null;
+};
+
+/** Wholegoods register line -> machine (model created on first sight; owner changes update the row). */
+async function upsertMachine(
+  tx: ServiceContext, r: Row, defaultMake: string | undefined,
+  custByCode: Map<string, string>, modelByKey: Map<string, string>, issues: Issue[],
+): Promise<Outcome> {
+  const serial = r.get('serial')!.trim();
+  const make = (r.get('make') ?? defaultMake ?? '').toUpperCase();
+  const model = r.get('model')!.trim();
+  if (!make) { issues.push({ rowNo: r.rowNo, severity: 'error', message: 'no make (set defaultMake)', raw: r.raw }); return 'skipped'; }
+  const key = `${make}|${model.toUpperCase()}`;
+  let modelId = modelByKey.get(key);
+  if (!modelId) {
+    const [m] = await tx.db.insert(machineModels).values({ tenantId: tx.tenantId, make, model, kind: r.get('kind') ?? null }).returning();
+    modelId = m!.id;
+    modelByKey.set(key, modelId);
+    issues.push({ rowNo: r.rowNo, severity: 'info', message: `new machine model ${make} ${model}` });
+  }
+  const acct = r.get('account_code')?.toUpperCase();
+  const customerId = acct ? custByCode.get(acct) ?? null : null;
+  if (acct && !customerId) issues.push({ rowNo: r.rowNo, severity: 'warn', message: `customer ${acct} not found; machine loaded without owner (load customers first)`, raw: r.raw });
+  const values = {
+    machineModelId: modelId, customerId, regNo: r.get('reg_no') ?? null,
+    year: intOrNull(r.get('year')), engineHours: intOrNull(r.get('hours')),
+  };
+  const [existing] = await tx.db.select().from(machines).where(and(eq(machines.tenantId, tx.tenantId), eq(machines.serial, serial)));
+  if (!existing) {
+    await tx.db.insert(machines).values({ ...values, tenantId: tx.tenantId, serial });
+    return 'created';
+  }
+  // Hours only go up; a lower figure is usually a typo or a replaced clock. Keep ours and say so.
+  if (existing.engineHours != null && values.engineHours != null && values.engineHours < existing.engineHours) {
+    issues.push({ rowNo: r.rowNo, severity: 'warn', message: `${serial} hours went down (${existing.engineHours} -> ${values.engineHours}); kept ${existing.engineHours}` });
+    values.engineHours = existing.engineHours;
+  }
+  // A blank in the export doesn't wipe what we know.
+  if (values.engineHours == null) values.engineHours = existing.engineHours;
+  if (values.year == null) values.year = existing.year;
+  if (values.regNo == null) values.regNo = existing.regNo;
+  const changed = existing.machineModelId !== values.machineModelId || existing.customerId !== values.customerId || existing.regNo !== values.regNo
+    || existing.year !== values.year || existing.engineHours !== values.engineHours;
+  if (!changed) return 'unchanged';
+  if (existing.customerId && values.customerId && existing.customerId !== values.customerId) {
+    issues.push({ rowNo: r.rowNo, severity: 'info', message: `${serial} changed owner` });
+  }
+  await tx.db.update(machines).set(values).where(eq(machines.id, existing.id));
+  return 'updated';
+}
+
+/** Invoice line -> part_sales_history. Idempotent on (invoice, line). */
+async function insertSalesLine(
+  tx: ServiceContext, r: Row, batchId: string, defaultMake: string | undefined,
+  custByCode: Map<string, string>, issues: Issue[],
+): Promise<Outcome> {
+  const pn = r.get('part_number')!;
+  const make = (r.get('make') ?? defaultMake ?? '').toUpperCase();
+  if (!make) { issues.push({ rowNo: r.rowNo, severity: 'error', message: 'no make/franchise (set defaultMake)', raw: r.raw }); return 'skipped'; }
+  const invoicedOn = parseUkDate(r.get('invoiced_on')!);
+  if (!invoicedOn) { issues.push({ rowNo: r.rowNo, severity: 'error', message: `unreadable date "${r.get('invoiced_on')}"`, raw: r.raw }); return 'skipped'; }
+  const qty = intOrNull(r.get('qty'));
+  if (qty == null) { issues.push({ rowNo: r.rowNo, severity: 'error', message: 'unreadable or fractional quantity', raw: r.raw }); return 'skipped'; }
+  const net = r.get('net') ? parsePounds(r.get('net')!) : null;
+  const acct = r.get('account_code')?.toUpperCase();
+  const customerId = acct ? custByCode.get(acct) ?? null : null;
+  if (acct && !customerId) issues.push({ rowNo: r.rowNo, severity: 'warn', message: `customer ${acct} not found; line kept without customer`, raw: r.raw });
+  let machineId: string | null = null;
+  const serial = r.get('serial');
+  if (serial) {
+    const [m] = await tx.db.select({ id: machines.id }).from(machines).where(and(eq(machines.tenantId, tx.tenantId), eq(machines.serial, serial.trim())));
+    machineId = m?.id ?? null;
+    if (!m) issues.push({ rowNo: r.rowNo, severity: 'warn', message: `machine ${serial} not in register; line kept without machine (load machines first)` });
+  }
+  const inserted = await tx.db
+    .insert(partSalesHistory)
+    .values({
+      tenantId: tx.tenantId, invoiceRef: r.get('invoice_ref')!.trim(), lineNo: intOrNull(r.get('line_no')) ?? 1, invoicedOn,
+      customerId, machineId, make, partNumber: pn, partNumberNorm: normalisePartNumber(pn), qty, netPence: net, batchId,
+    })
+    .onConflictDoNothing()
+    .returning({ id: partSalesHistory.id });
+  return inserted.length ? 'created' : 'unchanged';
 }
 
 class DryRunResult extends Error {

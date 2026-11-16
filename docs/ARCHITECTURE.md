@@ -41,6 +41,14 @@ One process today: API, MCP and the outbox dispatcher. They share only the datab
 
 Every business table has `tenant_id`, and services always filter on it. **Postgres row-level security is the planned second line of defence. It is not yet enabled.**
 
-## Carried over from v1, not yet ported
+## Field guidance (ported from v1, extended)
 
-v1 also modelled fitment (`part_fitment`, `machine_model`), licensed manuals (`content_licence`, `document_chunk`) with the `find_fitting_instructions` tool, telematics with consent (`predict_parts`), and multi-supplier offers with validity windows. These are differentiators but sit outside the transactional core. They are the next port (see ROADMAP). Their rules carry over unchanged: content is licensed or invisible, telematics needs consent, and specs are quoted verbatim.
+`machine_models`, `machines` (by serial, per customer), `part_fitment`, `content_licences`, `service_documents`, `procedures` (+ `procedure_steps`, `procedure_parts`) and `guidance_packs`. Rules:
+
+- **Licensed or invisible.** Every document hangs off a licence. Expired licences hide their content; responses say how much was withheld and why.
+- **Purpose-aware.** `allow_offline` gates job packs, `allow_ai` gates the MCP `find_fitting_instructions` tool. Online viewing needs only a live licence.
+- **Keyed by part number**, like supersessions, and looked up across the whole supersession chain, so an engineer holding the old number still finds the right procedure.
+- **Specs verbatim** with document ref and page. Never estimated.
+- **Offline packs** (`POST /v1/guidance/packs`) bundle machine, parts and procedures. Expiry is the shortest licence window. Each issue is audited (`guidance.pack_issued`). Devices re-check `GET /v1/guidance/packs/:ref` when online; the server's expiry and revocation win.
+
+Still to port from v1: consented telematics (`predict_parts`) and multi-supplier offers.

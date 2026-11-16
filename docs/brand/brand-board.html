@@ -1,0 +1,275 @@
+<title>Linchpin Brand Board</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,500;112,700;112,800;125,800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: a working brand board. Thesis band, then name directions, system (colour, type), product in use, voice. Stamped-metal spec chips are the signature detail. */
+:root {
+  --ink: #15191C;
+  --mist: #EEF1EE;
+  --paper: #F8FAF8;
+  --steel: #5E6A71;
+  --line: #D3D9D5;
+  --teal: #0A6E69;
+  --teal-bright: #2BB3A8;
+  --loam: #6B5440;
+  --danger: #C62828;
+  --caution: #F2A900;
+  --ok: #2E7D32;
+  --bg: var(--mist);
+  --surface: var(--paper);
+  --fg: var(--ink);
+  --muted: var(--steel);
+  --accent: var(--teal);
+  --chip-bg: var(--ink);
+  --chip-fg: #E7F3EE;
+  --display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101416; --surface: #171D20; --fg: #E6ECE8; --muted: #94A29C; --line: #2A3337;
+    --accent: #2BB3A8; --chip-bg: #0A1012; --chip-fg: #CFEDE4; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101416; --surface: #171D20; --fg: #E6ECE8; --muted: #94A29C; --line: #2A3337;
+  --accent: #2BB3A8; --chip-bg: #0A1012; --chip-fg: #CFEDE4; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); margin: 0; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 0 72px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--display); font-stretch: 112%; line-height: 1.1; margin: 0; text-wrap: balance; }
+h2 { font-size: 26px; font-weight: 800; }
+h3 { font-size: 17px; font-weight: 700; }
+p { margin: 0; max-width: 64ch; }
+.label { font: 600 11px var(--body); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+section { padding-block: 44px 0; display: flex; flex-direction: column; gap: 18px; }
+.lede { color: var(--muted); }
+.mono { font-family: var(--mono); }
+
+/* Thesis band (always dark: a plate on a machine) */
+.thesis { background: #15191C; color: #E6ECE8; padding-block: 56px 48px; }
+.thesis .wrap { padding-block: 0; display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; align-items: end; }
+.thesis .label { color: #8FA39B; }
+.thesis p { color: #B9C7C1; font-size: 17px; }
+.wordmark { font-family: var(--display); font-weight: 800; font-stretch: 125%; letter-spacing: -.01em; line-height: 1; display: inline-flex; align-items: baseline; }
+.wordmark.xl { font-size: clamp(54px, 10vw, 112px); color: #F2F6F3; }
+.pin-i { position: relative; display: inline-block; }
+.pin-i .hoop { position: absolute; left: 50%; top: -.06em; width: .3em; height: .3em; transform: translateX(-50%); border: .065em solid var(--teal-bright); border-radius: 50%; }
+.thesis-copy { display: flex; flex-direction: column; gap: 14px; }
+.tag { font-family: var(--display); font-stretch: 112%; font-weight: 700; font-size: 22px; color: #F2F6F3; }
+.plate { border: 1px solid #2E383C; border-radius: 6px; padding: 14px 16px; display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font: 500 13px var(--mono); color: #CFDCD6; background: #1B2225; }
+.plate span:nth-child(odd) { color: #7E918A; }
+
+/* Name directions */
+.names { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.name-card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.name-card.pick { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.name-card .wordmark { font-size: 40px; color: var(--fg); }
+.name-card .pin-i .hoop { border-color: var(--accent); }
+.verdict { align-self: flex-start; font: 600 12px var(--body); padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.pick .verdict { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+.risk { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 10px; }
+.rejected { font-size: 13px; color: var(--muted); }
+.rejected s { color: var(--fg); }
+
+/* Colour */
+.swatches { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.sw { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.sw i { display: block; aspect-ratio: 4 / 3; border-radius: 8px; border: 1px solid var(--line); }
+.sw b { font-weight: 600; }
+.sw code { font: 500 12px var(--mono); color: var(--muted); }
+.signals { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
+.sig { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 99px; padding: 3px 10px 3px 4px; color: var(--fg); }
+.sig i { width: 14px; height: 14px; border-radius: 50%; display: block; }
+.avoid { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
+.avoid span { width: 26px; height: 26px; border-radius: 5px; position: relative; display: block; }
+.avoid span::after { content: ""; position: absolute; inset: 50% -3px auto; height: 2px; background: var(--bg); transform: rotate(-35deg); }
+
+/* Type */
+.type { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.spec-card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.big-a { font-family: var(--display); font-stretch: 125%; font-weight: 800; font-size: 44px; line-height: 1; }
+.big-b { font: 600 34px/1 var(--body); }
+.big-c { font: 600 30px/1 var(--mono); }
+
+/* Product in use */
+.phones { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.phone { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.phone-bar { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); padding: 2px 4px 8px; border-bottom: 1px solid var(--line); }
+.phone-bar strong { color: var(--fg); font-family: var(--display); font-stretch: 112%; }
+.bubble { background: var(--bg); border-radius: 12px; padding: 10px 12px; font-size: 14px; }
+.bubble.me { align-self: flex-end; background: var(--accent); color: var(--surface); max-width: 85%; }
+.photo { height: 92px; border-radius: 10px; background: repeating-linear-gradient(135deg, #59606A 0 8px, #4A5058 8px 16px); display: grid; place-items: center; color: #DDE3E0; font-size: 12px; }
+.part { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.pn { font: 600 19px var(--mono); }
+.price { font: 700 22px var(--display); font-stretch: 112%; }
+.why { font-size: 12.5px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+.why span::before { content: "✓ "; color: var(--ok); font-weight: 700; }
+.btn { font: 600 14px var(--body); background: var(--accent); color: var(--surface); border: 0; border-radius: 10px; padding: 12px; text-align: center; }
+.btn.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+.chip { display: inline-flex; border-radius: 6px; overflow: hidden; font-size: 12.5px; border: 1px solid var(--chip-bg); align-self: flex-start; }
+.chip .k { padding: 4px 8px; background: var(--surface); }
+.chip .v { padding: 4px 8px; background: var(--chip-bg); color: var(--chip-fg); font: 600 12.5px var(--mono); }
+.step { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: start; font-size: 14px; }
+.tick { width: 20px; height: 20px; border-radius: 5px; border: 2px solid var(--line); }
+.tick.on { background: var(--ok); border-color: var(--ok); }
+.page { font: 600 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+.caution { background: #FFF4D6; color: #6E4A00; border-radius: 8px; padding: 6px 9px; font-size: 13px; font-weight: 600; }
+.verified { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.verified b { color: var(--ok); }
+.case { border-left: 3px solid var(--caution); padding: 8px 10px; background: var(--bg); border-radius: 0 8px 8px 0; font-size: 13px; }
+
+/* Voice */
+.voice { width: 100%; border-collapse: collapse; font-size: 14px; }
+.voice-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.voice th { text-align: left; font: 600 11px var(--body); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.voice td { padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.voice tr:last-child td { border-bottom: 0; }
+.voice td:first-child { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--danger) 60%, transparent); }
+.foot { font-size: 13px; color: var(--muted); padding-top: 36px; }
+
+@media (max-width: 860px) {
+  .thesis .wrap, .names, .type, .phones { grid-template-columns: 1fr; }
+  .swatches { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+</style>
+
+<header class="thesis">
+  <div class="wrap">
+    <div class="thesis-copy">
+      <span class="label">Brand direction · for decision</span>
+      <div class="wordmark xl" aria-label="linchpin">l<span class="pin-i">ı<span class="hoop"></span></span>nchpin</div>
+      <div class="tag">Right part. Right way. First time.</div>
+    </div>
+    <div class="thesis-copy">
+      <p>The pin on every hitch, and the thing everything depends on. Parts and service for UK machinery dealers, built for the yard, the field and the counter. It shows its evidence, and when it isn't sure it gets you a person.</p>
+      <div class="plate" aria-label="Product family">
+        <span>PARTS</span><span>AI parts finder, dealer-branded</span>
+        <span>FIELD</span><span>Engineer field guide, offline</span>
+        <span>DESK</span><span>Callbacks, verification, counter</span>
+        <span>API</span><span>REST, webhooks, MCP</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section>
+    <span class="label">01 · Name directions</span>
+    <h2>Three names farmers understand instantly</h2>
+    <div class="names">
+      <article class="name-card pick">
+        <span class="verdict">Recommended</span>
+        <div class="wordmark" aria-label="linchpin">l<span class="pin-i">ı<span class="hoop"></span></span>nchpin</div>
+        <p>The pin that keeps the implement on, and the idiom for the part everything relies on. Sounds like infrastructure, not a gadget.</p>
+        <div class="risk">First-pass check: unrelated UK consultancy and marketing firms only; nothing in ag or dealer software. Register a figurative mark.</div>
+      </article>
+      <article class="name-card">
+        <span class="verdict">Strong backup</span>
+        <div class="wordmark">toplink</div>
+        <p>The adjustable link that connects tractor to implement and sets it right. Connects dealer, farmer and manufacturer.</p>
+        <div class="risk">First-pass check: no UK software company found; a Croatian agency trades as "Top Link".</div>
+      </article>
+      <article class="name-card">
+        <span class="verdict">Warm alternative</span>
+        <div class="wordmark">fettle</div>
+        <p>Rural British for fix or put in order: "in fine fettle". Human and repair-first.</p>
+        <div class="risk">Adjacent clash: a "Fettle" app already identifies tools from photos; also a bike-repair app.</div>
+      </article>
+    </div>
+    <p class="rejected">Ruled out: <s>Headland</s> (Headland Amenity and Headland crop-protection products in the ag channel), <s>Tramline</s> (Tramlines Agritech Ltd; Agrii podcast), <s>Furrow</s> (John Deere's <i>The Furrow</i>). Trademark (UK IPO, EUIPO, classes 9/35/37/42) and domain checks still to do.</p>
+  </section>
+
+  <section>
+    <span class="label">02 · Colour</span>
+    <h2>Teal, because no tractor maker owns it</h2>
+    <p class="lede">We serve every make, and dealers are franchise-bound, so the brand never borrows an OEM's colours. Safety colours keep their ISO 3864 meaning and are never decoration.</p>
+    <div class="swatches">
+      <div class="sw"><i style="background:#15191C"></i><b>Ink</b><code>#15191C</code></div>
+      <div class="sw"><i style="background:#EEF1EE"></i><b>Mist</b><code>#EEF1EE</code></div>
+      <div class="sw"><i style="background:#5E6A71"></i><b>Steel</b><code>#5E6A71</code></div>
+      <div class="sw"><i style="background:#0A6E69"></i><b>Teal 700</b><code>#0A6E69</code></div>
+      <div class="sw"><i style="background:#2BB3A8"></i><b>Teal 400</b><code>#2BB3A8</code></div>
+      <div class="sw"><i style="background:#6B5440"></i><b>Loam</b><code>#6B5440</code></div>
+    </div>
+    <div class="signals">Safety only:
+      <span class="sig"><i style="background:#C62828"></i>Danger</span>
+      <span class="sig"><i style="background:#F2A900"></i>Caution</span>
+      <span class="sig"><i style="background:#2E7D32"></i>OK / in stock</span>
+    </div>
+    <div class="avoid">Never for brand use:
+      <span style="background:#367C2B" title="Deere green"></span><span style="background:#FFDE00" title="Deere yellow"></span><span style="background:#C8102E" title="Massey red"></span><span style="background:#B5191F" title="Case IH red"></span><span style="background:#0068B5" title="New Holland blue"></span><span style="background:#B5BD00" title="CLAAS green"></span><span style="background:#5C8B2A" title="Fendt green"></span><span style="background:#F05A28" title="Kubota orange"></span><span style="background:#FCB026" title="JCB yellow"></span>
+    </div>
+  </section>
+
+  <section>
+    <span class="label">03 · Type</span>
+    <h2>Machine-plate headings, numbers set like they're stamped</h2>
+    <div class="type">
+      <div class="spec-card"><span class="label">Display · Archivo Expanded</span><div class="big-a">Hitch &amp; PTO</div><p class="lede">Wordmark and headings. Industrial grotesk, a nod to serial plates.</p></div>
+      <div class="spec-card"><span class="label">Interface · Inter</span><div class="big-b">Collect today</div><p class="lede">Everything people read and tap. Clear in sunlight and at small sizes.</p></div>
+      <div class="spec-card"><span class="label">Numbers · IBM Plex Mono</span><div class="big-c">ACM-10044</div><p class="lede">Part numbers, serials, specs, page refs. Exactly as the source writes them.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <span class="label">04 · In use</span>
+    <h2>Evidence on every answer, a person when it's not sure</h2>
+    <div class="phones">
+      <div class="phone" aria-label="Parts finder">
+        <div class="phone-bar"><strong>Brookfield Agri Parts</strong><span>powered by linchpin</span></div>
+        <div class="photo">photo: oil filter, 6.2 kB</div>
+        <div class="bubble me">Need one of these for the AT-165, reg DX71 HLT</div>
+        <div class="part">
+          <span class="label">Your machine · ACM AT-165 · K004417</span>
+          <div class="pn">ACM-10044</div>
+          <div>Engine oil filter. Replaces ACM-10021A, straight swap.</div>
+          <div class="why"><span>Number on your photo matches ACM-10021</span><span>Fits AT-165, Engine › Lubrication</span><span>Superseded twice; current part shown</span></div>
+          <div class="price">£21.71 <span class="lede" style="font:500 13px var(--body)">ex VAT, your contract price</span></div>
+          <div class="verified">6 at Hereford · <b>collect today</b></div>
+        </div>
+        <div class="btn">Add to order</div>
+      </div>
+
+      <div class="phone" aria-label="Field guide">
+        <div class="phone-bar"><strong>Field</strong><span>offline · valid 7 days</span></div>
+        <div><span class="label">SB-1200 baler · NFB12-88213</span><h3 style="margin-top:4px">Knotter bill hook replacement</h3></div>
+        <div class="step"><span class="tick on"></span><span style="text-decoration:line-through;opacity:.6">Disconnect PTO, fit flywheel brake pin, open knotter guard.</span><span class="page">p.510</span></div>
+        <div class="step"><span class="tick"></span><span style="display:flex;flex-direction:column;gap:8px">Fit revised bracket NFB-2216 to the knotter frame.<span class="chip"><span class="k">Bracket bolt torque</span><span class="v">35 N·m</span></span></span><span class="page">p.512</span></div>
+        <div class="step"><span class="tick"></span><span style="display:flex;flex-direction:column;gap:8px">Check bill hook timing with the gauge.<span class="caution">Old bracket won't hold the revised hook. Don't refit it.</span></span><span class="page">p.513</span></div>
+        <div class="verified">Verified by <b>J. Morgan, workshop foreman</b> · tap a step for the manual page</div>
+      </div>
+
+      <div class="phone" aria-label="Callback">
+        <div class="phone-bar"><strong>Brookfield Agri Parts</strong><span>powered by linchpin</span></div>
+        <div class="bubble me">Bracket off the side of the hedgecutter, sheared. No number on it.</div>
+        <div class="bubble">I can't be sure from the photos which bracket this is, and it's on the arm, so I'd rather a person checked it.</div>
+        <div class="case"><b>Dave in parts will ring you before 3:15pm.</b><br>He's got your photos, the machine (Flailmaster 5.5, FM55-20219) and everything we've looked at.</div>
+        <div class="btn ghost">Change time or number</div>
+      </div>
+    </div>
+    <p class="lede" style="font-size:13px">Mock-ups use the demo's invented makes and numbers. The specs shown are invented.</p>
+  </section>
+
+  <section>
+    <span class="label">05 · Voice</span>
+    <h2>Talk like the best parts person you've known</h2>
+    <div class="voice-wrap">
+      <table class="voice">
+        <thead><tr><th>Not this</th><th>This</th></tr></thead>
+        <tbody>
+          <tr><td>Our AI-powered solution found 3 matches!</td><td>That's the oil filter for your AT-165: ACM-10044. Straight swap for the old 10021A.</td></tr>
+          <tr><td>Sorry, an error occurred. Please try again.</td><td>I can't be certain from that photo. Dave in parts will ring you before 3:15.</td></tr>
+          <tr><td>A ticket has been raised.</td><td>Sarah's got your photos and will call you within the hour.</td></tr>
+          <tr><td>Only 2 left, buy now!</td><td>2 at Hereford, 5 at Ludlow. Collect today or next-day to the farm.</td></tr>
+          <tr><td>WARNING!!! Read all instructions!</td><td>Lower the head and take the key out first. The rotor runs on for a minute.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="foot">Source of truth: <span class="mono">docs/BRAND.md</span>. Once a name is chosen, these tokens become the design system in <span class="mono">packages/ui</span>.</p>
+</main>

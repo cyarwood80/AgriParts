@@ -535,6 +535,31 @@ export const integrationConnections = pgTable('integration_connections', {
 export const batchStatus = pgEnum('batch_status', ['running', 'loaded', 'dry_run', 'failed']);
 
 /**
+ * Registry of every feed a dealer's data comes from (ADR-0005). Batches point
+ * here, so "where did this fact come from?" always has an answer, and when two
+ * sources disagree the lower `precedence` wins.
+ */
+export const dataSources = pgTable(
+  'data_sources',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    /** ibcos-gold | kramp-prices | mcconnel-parts-books | dealer-uploads ... */
+    code: text('code').notNull(),
+    /** dms_export | supplier_price_file | parts_book | manual | dealer_upload | oem_portal */
+    kind: text('kind').notNull(),
+    name: text('name').notNull(),
+    licenceId: uuid('licence_id').references(() => contentLicences.id),
+    precedence: integer('precedence').notNull().default(50),
+    config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
+    isActive: boolean('is_active').notNull().default(true),
+    lastLoadedAt: timestamp('last_loaded_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('data_sources_tenant_code_uq').on(t.tenantId, t.code)],
+);
+
+/**
  * Provenance: every file load (price file, Ibcos export) is a batch.
  * Re-loading the same file (same checksum) for the same source is a no-op.
  */
@@ -547,6 +572,7 @@ export const ingestBatches = pgTable(
     kind: text('kind').notNull(),
     /** Supplier code, or "ibcos-gold" etc. */
     source: text('source').notNull(),
+    dataSourceId: uuid('data_source_id').references(() => dataSources.id),
     sourceName: text('source_name').notNull(),
     checksum: text('checksum').notNull(),
     mapping: jsonb('mapping').$type<Record<string, unknown>>().notNull(),
@@ -655,4 +681,484 @@ export const auditLog = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index('audit_tenant_time_idx').on(t.tenantId, t.createdAt)],
+);
+
+// ---------------------------------------------------------------------------
+// Field guidance: licensed manufacturer content aligned to parts and machines
+//
+// Rules (carried over from v1):
+//  - Content is licensed or invisible. Every document hangs off a licence;
+//    expired licences hide their content, and only licences that allow it
+//    can be packed for offline use or shown to AI agents.
+//  - Specs (torques, pressures, capacities) are stored and shown verbatim
+//    with their page reference. Nothing is estimated.
+//  - Procedures reference parts by normalised number (like supersessions),
+//    because manuals cite OEM numbers the dealer may never have stocked.
+// ---------------------------------------------------------------------------
+
+export const contentLicences = pgTable('content_licences', {
+  id: id(),
+  tenantId: tenantId(),
+  publisher: text('publisher').notNull(),
+  title: text('title').notNull(),
+  reference: text('reference'),
+  /** dealer_owned | manufacturer_licence | oem_consent | link_only */
+  kind: text('kind').notNull().default('manufacturer_licence'),
+  /** tenant | platform. Only tenant scope is served until shared-row RLS exists (ADR-0005). */
+  scope: text('scope').notNull().default('tenant'),
+  /** Where the signed letter / consent email lives. No reference, no licence. */
+  permissionRef: text('permission_ref'),
+  sourceUrl: text('source_url'),
+  contact: text('contact'),
+  allowOffline: boolean('allow_offline').notNull().default(false),
+  allowAi: boolean('allow_ai').notNull().default(false),
+  /** Max days an offline pack may live on a device before it must re-validate. */
+  offlineDays: integer('offline_days').notNull().default(14),
+  validFrom: date('valid_from'),
+  expiresOn: date('expires_on'),
+  createdAt: createdAt(),
+});
+
+export const machineModels = pgTable(
+  'machine_models',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    make: text('make').notNull(),
+    model: text('model').notNull(),
+    series: text('series'),
+    kind: text('kind'),
+    yearFrom: integer('year_from'),
+    yearTo: integer('year_to'),
+  },
+  (t) => [uniqueIndex('machine_models_tenant_make_model_uq').on(t.tenantId, t.make, t.model)],
+);
+
+/** A customer's machine. The engineer's job usually starts from a serial number. */
+export const machines = pgTable(
+  'machines',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    customerId: uuid('customer_id').references(() => customers.id),
+    machineModelId: uuid('machine_model_id')
+      .notNull()
+      .references(() => machineModels.id),
+    serial: text('serial').notNull(),
+    regNo: text('reg_no'),
+    year: integer('year'),
+    engineHours: integer('engine_hours'),
+    site: text('site'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('machines_tenant_serial_uq').on(t.tenantId, t.serial)],
+);
+
+/**
+ * Historical sales lines from the dealer's DMS (Ibcos). Separate from
+ * sales_orders: this is what was invoiced before AgriParts, used as the parts
+ * finder's "what did they buy last time" prior, to infer fitment, and to build
+ * the accuracy eval set. Keyed by part number like supersessions, because old
+ * lines cite numbers that may have been superseded since.
+ */
+export const partSalesHistory = pgTable(
+  'part_sales_history',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: tenantId(),
+    invoiceRef: text('invoice_ref').notNull(),
+    lineNo: integer('line_no').notNull().default(1),
+    invoicedOn: date('invoiced_on').notNull(),
+    customerId: uuid('customer_id').references(() => customers.id),
+    machineId: uuid('machine_id').references(() => machines.id),
+    make: text('make').notNull(),
+    partNumber: text('part_number').notNull(),
+    partNumberNorm: text('part_number_norm').notNull(),
+    qty: integer('qty').notNull(),
+    netPence: integer('net_pence'),
+    batchId: uuid('batch_id').references(() => ingestBatches.id),
+  },
+  (t) => [
+    uniqueIndex('part_sales_history_line_uq').on(t.tenantId, t.invoiceRef, t.lineNo),
+    index('part_sales_history_customer_idx').on(t.tenantId, t.customerId, t.invoicedOn),
+    index('part_sales_history_part_idx').on(t.tenantId, t.make, t.partNumberNorm),
+    index('part_sales_history_machine_idx').on(t.machineId),
+  ],
+);
+
+export const partFitment = pgTable(
+  'part_fitment',
+  {
+    tenantId: tenantId(),
+    machineModelId: uuid('machine_model_id')
+      .notNull()
+      .references(() => machineModels.id),
+    make: text('make').notNull(),
+    partNumberNorm: text('part_number_norm').notNull(),
+    assembly: text('assembly'),
+    qtyPerMachine: integer('qty_per_machine').notNull().default(1),
+    /** parts_book | oem_epc | sales_inferred | manual | seed */
+    source: text('source').notNull().default('manual'),
+    batchId: uuid('batch_id').references(() => ingestBatches.id),
+    /** The parts-book page and diagram callout this line came from. */
+    documentId: uuid('document_id').references(() => serviceDocuments.id),
+    page: integer('page'),
+    figureRef: text('figure_ref'),
+    /** Serial break: the same model changes parts mid-run. Null = open-ended. */
+    serialFrom: text('serial_from'),
+    serialTo: text('serial_to'),
+    /** 0-100. sales_inferred lines are low until verified. */
+    confidence: integer('confidence').notNull().default(100),
+    verifiedBy: text('verified_by'),
+  },
+  (t) => [primaryKey({ columns: [t.machineModelId, t.make, t.partNumberNorm] })],
+);
+
+export const serviceDocuments = pgTable(
+  'service_documents',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    licenceId: uuid('licence_id')
+      .notNull()
+      .references(() => contentLicences.id),
+    make: text('make').notNull(),
+    /** workshop_manual | operator_manual | service_bulletin */
+    kind: text('kind').notNull(),
+    title: text('title').notNull(),
+    docRef: text('doc_ref').notNull(),
+    revision: text('revision'),
+    publishedOn: date('published_on'),
+    /** Blob-store key of the source PDF (local in dev, R2 in production). */
+    fileKey: text('file_key'),
+    fileSha256: text('file_sha256'),
+    pageCount: integer('page_count'),
+    sourceUrl: text('source_url'),
+    language: text('language').notNull().default('en'),
+    /** uploaded | paged | extracting | in_review | live | withdrawn */
+    status: text('status').notNull().default('live'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('service_documents_tenant_idx').on(t.tenantId, t.make), index('service_documents_sha_idx').on(t.tenantId, t.fileSha256)],
+);
+
+/**
+ * The text layer of every page. Ground truth for the verbatim spec check and
+ * the "show me the original page" view. `label` is the page number printed in
+ * the manual ("4-12"), which rarely matches the PDF page index.
+ */
+export const documentPages = pgTable(
+  'document_pages',
+  {
+    tenantId: tenantId(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => serviceDocuments.id, { onDelete: 'cascade' }),
+    page: integer('page').notNull(),
+    label: text('label'),
+    text: text('text').notNull(),
+    textSha256: text('text_sha256').notNull(),
+    imageKey: text('image_key'),
+  },
+  (t) => [primaryKey({ columns: [t.documentId, t.page] })],
+);
+
+export interface ProcedureSpec {
+  label: string;
+  /** Verbatim from the source document. */
+  value: string;
+  unit?: string;
+}
+
+export const procedures = pgTable(
+  'procedures',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => serviceDocuments.id),
+    /** Null = applies to every model the document covers. */
+    machineModelId: uuid('machine_model_id').references(() => machineModels.id),
+    code: text('code').notNull(),
+    title: text('title').notNull(),
+    summary: text('summary'),
+    estMinutes: integer('est_minutes'),
+    /** basic | competent | specialist */
+    skill: text('skill').notNull().default('competent'),
+    pageFrom: integer('page_from'),
+    pageTo: integer('page_to'),
+    tools: jsonb('tools').$type<string[]>().notNull().default([]),
+    safety: jsonb('safety').$type<string[]>().notNull().default([]),
+    /**
+     * draft | in_review | published | rejected | withdrawn.
+     * Only `published` is ever shown to engineers, packs or agents.
+     */
+    status: text('status').notNull().default('draft'),
+    /** extracted | manual_entry | seed */
+    origin: text('origin').notNull().default('manual_entry'),
+    extractionRunId: uuid('extraction_run_id').references(() => extractionRuns.id),
+    /** Result of the deterministic checks (verbatim specs, pages, units). */
+    checkReport: jsonb('check_report').$type<CheckReport>(),
+    version: integer('version').notNull().default(1),
+    verifiedBy: text('verified_by'),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('procedures_tenant_doc_idx').on(t.tenantId, t.documentId), index('procedures_tenant_status_idx').on(t.tenantId, t.status)],
+);
+
+export interface CheckIssue {
+  severity: 'error' | 'warn';
+  code: string;
+  message: string;
+  stepSeq?: number;
+}
+export interface CheckReport {
+  ok: boolean;
+  checkedAt: string;
+  issues: CheckIssue[];
+}
+
+/** One Claude extraction call (or batch item) over a document page window. */
+export const extractionRuns = pgTable(
+  'extraction_runs',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => serviceDocuments.id),
+    model: text('model').notNull(),
+    /** sync | batch | import (structured output supplied from elsewhere) */
+    mode: text('mode').notNull().default('sync'),
+    pageFrom: integer('page_from'),
+    pageTo: integer('page_to'),
+    /** running | succeeded | failed */
+    status: text('status').notNull().default('running'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    cacheReadTokens: integer('cache_read_tokens'),
+    output: jsonb('output').$type<unknown>(),
+    error: text('error'),
+    actor: text('actor').notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [index('extraction_runs_doc_idx').on(t.documentId)],
+);
+
+/** The foreman's decision on a procedure version. Append-only. */
+export const contentReviews = pgTable(
+  'content_reviews',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: tenantId(),
+    procedureId: uuid('procedure_id')
+      .notNull()
+      .references(() => procedures.id),
+    version: integer('version').notNull(),
+    reviewer: text('reviewer').notNull(),
+    /** approve | reject | edit | withdraw */
+    decision: text('decision').notNull(),
+    notes: text('notes'),
+    at: createdAt(),
+  },
+  (t) => [index('content_reviews_proc_idx').on(t.procedureId)],
+);
+
+/** An engineer says "this step doesn't match the machine". Open flags send the procedure back for review. */
+export const contentFlags = pgTable(
+  'content_flags',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    procedureId: uuid('procedure_id')
+      .notNull()
+      .references(() => procedures.id),
+    stepSeq: integer('step_seq'),
+    flaggedBy: text('flagged_by').notNull(),
+    message: text('message').notNull(),
+    /** open | resolved | dismissed */
+    status: text('status').notNull().default('open'),
+    resolution: text('resolution'),
+    createdAt: createdAt(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (t) => [index('content_flags_tenant_status_idx').on(t.tenantId, t.status)],
+);
+
+/**
+ * Deep links into manufacturer portals (e.g. the OEM's service-information
+ * site). We store where to go, never the content: the day-one route for
+ * franchise content before written consent (ADR-0004).
+ */
+export const documentLinks = pgTable(
+  'document_links',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    make: text('make').notNull(),
+    machineModelId: uuid('machine_model_id').references(() => machineModels.id),
+    partNumberNorm: text('part_number_norm'),
+    label: text('label').notNull(),
+    /** May contain {serial} and {partNumber} placeholders. https only. */
+    urlTemplate: text('url_template').notNull(),
+    portal: text('portal').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('document_links_lookup_idx').on(t.tenantId, t.make)],
+);
+
+export const procedureSteps = pgTable(
+  'procedure_steps',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    procedureId: uuid('procedure_id')
+      .notNull()
+      .references(() => procedures.id),
+    seq: integer('seq').notNull(),
+    instruction: text('instruction').notNull(),
+    page: integer('page'),
+    specs: jsonb('specs').$type<ProcedureSpec[]>().notNull().default([]),
+    caution: text('caution'),
+  },
+  (t) => [uniqueIndex('procedure_steps_proc_seq_uq').on(t.procedureId, t.seq)],
+);
+
+export const procedureParts = pgTable(
+  'procedure_parts',
+  {
+    tenantId: tenantId(),
+    procedureId: uuid('procedure_id')
+      .notNull()
+      .references(() => procedures.id),
+    make: text('make').notNull(),
+    partNumberNorm: text('part_number_norm').notNull(),
+    /** replaced | consumable | may_need */
+    role: text('role').notNull().default('replaced'),
+    qty: integer('qty').notNull().default(1),
+  },
+  (t) => [
+    primaryKey({ columns: [t.procedureId, t.make, t.partNumberNorm] }),
+    index('procedure_parts_lookup_idx').on(t.tenantId, t.make, t.partNumberNorm),
+  ],
+);
+
+/** Every offline pack issued to a device: who, what, until when. Publishers ask for this. */
+export const guidancePacks = pgTable(
+  'guidance_packs',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    packRef: text('pack_ref').notNull(),
+    issuedTo: text('issued_to').notNull(),
+    machineId: uuid('machine_id').references(() => machines.id),
+    jobRef: text('job_ref'),
+    partNumbers: jsonb('part_numbers').$type<string[]>().notNull().default([]),
+    procedureIds: jsonb('procedure_ids').$type<string[]>().notNull().default([]),
+    contentHash: text('content_hash').notNull(),
+    issuedAt: createdAt(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('guidance_packs_tenant_ref_uq').on(t.tenantId, t.packRef)],
+);
+
+// ---------------------------------------------------------------- parts finder (ADR-0003)
+
+/** What the agent proposes for one candidate part. Evidence is computed from our data, never by the model. */
+export interface EnquiryEvidence {
+  /** parts_book | supersession | history | described | number | equivalent | manual | machine */
+  kind: string;
+  text: string;
+  ref?: string;
+}
+export interface EnquiryCandidate {
+  make: string;
+  partNumber: string;
+  description: string;
+  /** best | option | alternative | ruled_out */
+  role: string;
+  why: string;
+  evidence: EnquiryEvidence[];
+  requested?: string | null;
+  superseded?: boolean;
+  straightSwap?: boolean;
+  warning?: string | null;
+  unitNetPence?: number | null;
+  priceBasis?: string | null;
+  stock?: { depot: string; available: number }[];
+  guide?: { procedureId: string; code: string; title: string; pages: string | null; estMinutes: number | null } | null;
+  /** Service bulletins that mention this part. */
+  bulletins?: { code: string; title: string; summary: string | null }[];
+  /** Consumables and likely extras from the fitting procedure. */
+  withIt?: { make: string; partNumber: string; description: string | null; role: string; qty: number }[];
+  safetyCritical?: boolean;
+}
+export interface EnquiryResult {
+  engine: 'claude' | 'rules';
+  /** high | medium | low */
+  confidence: string;
+  /** Draft reply for the parts person to send (or edit). */
+  reply: string;
+  question: string | null;
+  candidates: EnquiryCandidate[];
+  escalate: { reason: string; urgency: string } | null;
+  notes: string[];
+  at: string;
+}
+
+/**
+ * A customer enquiry: "I need the oil filter for the 165". The case the
+ * parts agent works on, and the callback queue when it hands over.
+ */
+export const enquiries = pgTable(
+  'enquiries',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    ref: text('ref').notNull(),
+    /** counter | phone | whatsapp | email | web */
+    channel: text('channel').notNull().default('counter'),
+    customerId: uuid('customer_id').references(() => customers.id),
+    contactName: text('contact_name'),
+    machineId: uuid('machine_id').references(() => machines.id),
+    subject: text('subject').notNull(),
+    /** open | waiting_customer | callback | resolved | closed */
+    status: text('status').notNull().default('open'),
+    /** normal | vor (vehicle off road: machine stopped) */
+    priority: text('priority').notNull().default('normal'),
+    assignedTo: text('assigned_to'),
+    callbackDueAt: timestamp('callback_due_at', { withTimezone: true }),
+    callbackReason: text('callback_reason'),
+    agentRounds: integer('agent_rounds').notNull().default(0),
+    result: jsonb('result').$type<EnquiryResult>(),
+    resolvedMake: text('resolved_make'),
+    resolvedPartNumberNorm: text('resolved_part_number_norm'),
+    resolution: text('resolution'),
+    createdBy: text('created_by').notNull(),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('enquiries_ref_uq').on(t.tenantId, t.ref), index('enquiries_status_idx').on(t.tenantId, t.status, t.updatedAt)],
+);
+
+export const enquiryMessages = pgTable(
+  'enquiry_messages',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: tenantId(),
+    enquiryId: uuid('enquiry_id')
+      .notNull()
+      .references(() => enquiries.id, { onDelete: 'cascade' }),
+    /** customer | staff | agent | system */
+    role: text('role').notNull(),
+    body: text('body').notNull(),
+    author: text('author'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('enquiry_messages_enquiry_idx').on(t.enquiryId, t.id)],
 );

@@ -7,7 +7,11 @@ import { buildApp } from './api/app.js';
 import { loadConfig } from './config.js';
 import { openDatabase } from './db/client.js';
 import { seedDemo } from './db/seed.js';
-import { tenants } from './db/schema.js';
+import { apiKeys, tenants } from './db/schema.js';
+import { seedGuidanceDemo } from './db/seed-guidance.js';
+import { createApiKey } from './services/auth.js';
+import { SCOPES } from './services/context.js';
+import { and, eq, isNull } from 'drizzle-orm';
 import { createLogAccountingAdapter, createXeroAdapter } from './integrations/accounting/xero.js';
 import type { AccountingAdapter } from './integrations/accounting/types.js';
 import { defaultOrderingRegistry } from './integrations/ordering/adapters.js';
@@ -24,6 +28,21 @@ if (config.seedDemo) {
     console.log(`  admin     ${keys.admin}`);
     console.log(`  counter   ${keys.counter}   <- use this one for MCP clients`);
     console.log(`  readonly  ${keys.readonly}\n`);
+  }
+}
+
+// Demo only: a fresh key for the web UI on every start, so the printed link always works.
+let uiLink: string | undefined;
+if (config.seedDemo) {
+  const [tenant] = await database.db.select({ id: tenants.id }).from(tenants).limit(1);
+  if (tenant) {
+    if (await seedGuidanceDemo(database.db, tenant.id)) console.log('Added demo field-guidance content');
+    await database.db
+      .update(apiKeys)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(apiKeys.tenantId, tenant.id), eq(apiKeys.name, 'Web UI (demo)'), isNull(apiKeys.revokedAt)));
+    const ui = await createApiKey(database.db, tenant.id, 'Web UI (demo)', [...SCOPES]);
+    uiLink = `http://localhost:${config.port}/app/#key=${ui.key}`;
   }
 }
 
@@ -55,7 +74,8 @@ const stopDispatcher = startDispatcher(
 );
 
 await app.listen({ port: config.port, host: config.host });
-app.log.info(`AgriParts on :${config.port} (db: ${database.driver}) - API docs /docs, MCP /mcp`);
+app.log.info(`AgriParts on :${config.port} (db: ${database.driver}) - web UI /app, API docs /docs, MCP /mcp`);
+if (uiLink) console.log(`\nOpen the web UI (demo key included):\n  ${uiLink}\n`);
 
 const shutdown = async () => {
   stopDispatcher();

@@ -14,6 +14,13 @@ export const SCOPES = [
   'purchasing:read',
   'purchasing:write',
   'insights:read',
+  'guidance:read',
+  /** Work customer enquiries with the parts agent: open, reply, hand over, resolve. */
+  'enquiries:write',
+  /** Register manuals, submit extractions, edit steps, manage portal links. */
+  'content:write',
+  /** Approve/reject procedures for publication: the workshop foreman. */
+  'content:review',
   'integrations:write',
   'webhooks:manage',
   'admin',
@@ -27,6 +34,7 @@ export const READ_ONLY_SCOPES: Scope[] = [
   'orders:read',
   'purchasing:read',
   'insights:read',
+  'guidance:read',
 ];
 
 export type Channel = 'rest' | 'mcp' | 'system' | 'import';

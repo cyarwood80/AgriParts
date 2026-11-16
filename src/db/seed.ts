@@ -12,6 +12,8 @@ import { normalisePartNumber } from '../lib/part-number.js';
 import { createApiKey } from '../services/auth.js';
 import { READ_ONLY_SCOPES, SCOPES, ServiceContext } from '../services/context.js';
 import { confirmOrder, createQuote } from '../services/orders.js';
+import { seedEnquiriesDemo } from './seed-enquiries.js';
+import { seedGuidanceDemo } from './seed-guidance.js';
 
 function mulberry32(seed: number) {
   return () => {
@@ -165,9 +167,12 @@ export async function seedDemo(db: DB, opts: { log?: (s: string) => void } = {})
   });
   await confirmOrder(ctx, q.number);
 
+  await seedGuidanceDemo(db, tenantId);
+  await seedEnquiriesDemo(db, tenantId);
+
   const admin = await createApiKey(db, tenantId, 'Demo admin', [...SCOPES]);
   const counter = await createApiKey(db, tenantId, 'Counter assistant (MCP)', [
-    ...READ_ONLY_SCOPES, 'orders:write', 'stock:write', 'purchasing:write',
+    ...READ_ONLY_SCOPES, 'orders:write', 'stock:write', 'purchasing:write', 'enquiries:write',
   ]);
   const readonly = await createApiKey(db, tenantId, 'Read-only analyst', READ_ONLY_SCOPES);
   log(`Seeded tenant ${tenant!.name} (${tenantId}): ${partRows.length} parts, ${moves.length} movements`);

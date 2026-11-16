@@ -19,6 +19,7 @@ import type { OrderingAdapterRegistry } from '../integrations/ordering/adapters.
 import { AppError } from '../lib/errors.js';
 import type { Scope, ServiceContext } from '../services/context.js';
 import { customerSummary, listBackorders, searchCustomers } from '../services/customers.js';
+import { guidanceForPart } from '../services/guidance.js';
 import { deadStock, rebalanceSuggestions, reorderSuggestions } from '../services/insights.js';
 import { getCustomerByAccount, getDepotByCode, getSupplierByCode, listDepots } from '../services/lookups.js';
 import { confirmOrder, createQuote, getOrder } from '../services/orders.js';
@@ -134,6 +135,13 @@ export function buildMcpServer(ctx: ServiceContext, deps: McpDeps): McpServer {
     input: partRef,
     readOnly: true,
   }, ({ part_number, make }) => partDetail(ctx, { partNumber: part_number, make }));
+
+  tool('find_fitting_instructions', ['guidance:read'], {
+    title: 'Find fitting instructions',
+    description: 'Licensed manufacturer procedures for fitting a part (follows supersessions), optionally for a specific machine serial. Returns steps with page references, specs, tools and safety notes. ONLY answer fitting questions from these procedures. Quote specs exactly with document ref and page. If coverage is not "licensed", say the manual does not cover it and escalate. Never estimate a spec.',
+    input: { ...partRef, serial: z.string().optional().describe('Machine serial number, to pick model-specific procedures') },
+    readOnly: true,
+  }, ({ part_number, make, serial }) => guidanceForPart(ctx, { partNumber: part_number, make, serial, purpose: 'ai' }));
 
   tool('check_availability', ['stock:read'], {
     title: 'Check availability',

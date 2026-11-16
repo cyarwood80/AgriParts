@@ -25,7 +25,8 @@ Don't fight Ibcos for the whole platform. Win the **parts department**: it's hig
 
 ## Phase 2: differentiate
 
-- Port the v1 differentiators: fitment, licensed manuals with page citations, consented-telematics `predict_parts`, and multi-supplier offers.
+- Field guidance is in (fitment, licensed procedures, offline job packs). Next: manual ingestion pipeline, first publisher licence, revocation UI, encrypt packs at rest on device.
+- Port the remaining v1 differentiators: consented-telematics `predict_parts` and multi-supplier offers.
 - First real OEM or allmakes ordering adapter (whichever the pilot dealer uses most).
 - Sage 50/200 accounting adapter.
 - Demand forecasting (seasonality: harvest, silage, hedge-cutting) behind the existing reorder contract.
@@ -41,7 +42,8 @@ Don't fight Ibcos for the whole platform. Win the **parts department**: it's hig
 
 ## Known gaps (be honest with the reseller)
 
-- No UI yet: API, MCP and docs only.
+- Web UI is a demo front end (no build step, API key sign-in). Needs per-user login (OAuth) before a pilot.
+- Field-guidance content is invented. Real manuals need a licence from each publisher, and an ingestion pipeline (PDF → procedures/steps/specs with page refs) that doesn't exist yet.
 - Ibcos column mappings are unconfirmed.
 - No real OEM integrations yet. Each needs that OEM's dealer programme access.
 - Single currency (GBP). VAT covers standard, reduced and zero rates only (no reverse charge, margin scheme, etc.).

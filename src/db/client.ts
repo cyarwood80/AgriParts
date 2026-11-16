@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
@@ -33,6 +34,8 @@ export async function openDatabase(url: string, opts: { migrate?: boolean } = {}
   const shouldMigrate = opts.migrate ?? true;
   if (url.startsWith('pglite://')) {
     const loc = url.slice('pglite://'.length);
+    // PGlite creates its data dir but not missing parents (e.g. a fresh .data/).
+    if (loc !== 'memory' && loc !== '') mkdirSync(path.dirname(path.resolve(loc)), { recursive: true });
     const client = new PGlite({ ...(loc === 'memory' || loc === '' ? {} : { dataDir: loc }), extensions: { pg_trgm } });
     const db = drizzlePglite(client, { schema });
     if (shouldMigrate) await migratePglite(db, { migrationsFolder });

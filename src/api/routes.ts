@@ -3,10 +3,20 @@ import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { ingestBatches, ingestIssues, webhookSubscriptions } from '../db/schema.js';
 import { importLegacyFile, LegacyImportSchema } from '../integrations/legacy-import/ibcos-bridge.js';
+import { FitmentImportSchema, importFitment, inferFitmentFromSales } from '../integrations/parts-books/fitment-import.js';
 import { importPriceFile } from '../integrations/price-files/import.js';
+import {
+  addDocumentLink, DocumentLinkSchema, editStep, ExtractedDocumentSchema, flagStep, getDocumentFile, getPage, listDocuments,
+  RegisterDocumentSchema, registerDocument, reviewDetail, reviewProcedure, reviewQueue, StepEditSchema, storePages, submitExtraction,
+} from '../services/content.js';
+import { listDataSources } from '../services/data-sources.js';
+import {
+  addCustomerMessage, getEnquiry, listEnquiries, OpenEnquirySchema, openEnquiry, requestCallback, resolveEnquiry, sendReply,
+} from '../services/parts-finder.js';
 import { deliveryStats, listEvents, newWebhookSecret } from '../integrations/webhooks/dispatcher.js';
 import { AppError } from '../lib/errors.js';
 import { customerSummary, listBackorders, searchCustomers } from '../services/customers.js';
+import { guidanceForPart, issueJobPack, listPacks, machineDetail, packStatus, searchMachines } from '../services/guidance.js';
 import { deadStock, rebalanceSuggestions, reorderSuggestions } from '../services/insights.js';
 import { getCustomerByAccount, listDepots } from '../services/lookups.js';
 import { cancelOrder, confirmOrder, createQuote, getOrder, invoiceOrder, listOrders } from '../services/orders.js';
@@ -131,7 +141,173 @@ export async function registerRoutes(app: App, deps: AppDeps) {
     schema: { tags: ['insights'], summary: 'Dead stock valued at cost', querystring: z.object({ depot: z.string().optional(), days: z.coerce.number().int().min(30).max(1095).default(365) }) },
   }, (req) => deadStock(svc(req), { depotCode: req.query.depot, days: req.query.days }));
 
+  // ---------------------------------------------------------------- field guidance
+  app.get('/v1/machines', {
+    schema: { tags: ['guidance'], summary: 'Find customer machines by serial, reg, model or customer', querystring: z.object({ q: z.string().min(2) }) },
+  }, (req) => searchMachines(svc(req), req.query.q));
+
+  app.get('/v1/machines/:serial', {
+    schema: { tags: ['guidance'], summary: 'Machine, its fitted parts and which have licensed guidance', params: z.object({ serial: z.string() }) },
+  }, (req) => machineDetail(svc(req), req.params.serial));
+
+  app.get('/v1/guidance', {
+    schema: {
+      tags: ['guidance'], summary: 'Licensed fitting procedures for a part (follows supersessions), optionally for a machine',
+      querystring: z.object({ partNumber: z.string(), make, serial: z.string().optional() }),
+    },
+  }, (req) => guidanceForPart(svc(req), { partNumber: req.query.partNumber, make: req.query.make, serial: req.query.serial }));
+
+  app.post('/v1/guidance/packs', {
+    schema: {
+      tags: ['guidance'], summary: 'Issue an offline job pack (machine + parts + licensed procedures); audited, expires',
+      body: z.object({ serial: z.string(), jobRef: z.string().max(60).optional(), parts: z.array(z.object({ partNumber: z.string().min(1), make })).min(1).max(30) }),
+    },
+  }, async (req, reply) => reply.status(201).send(await issueJobPack(svc(req), req.body)));
+
+  app.get('/v1/guidance/packs', {
+    schema: { tags: ['guidance'], summary: 'Recently issued offline packs', querystring: z.object({ limit: z.coerce.number().int().min(1).max(100).default(25) }) },
+  }, (req) => listPacks(svc(req), req.query.limit));
+
+  app.get('/v1/guidance/packs/:packRef', {
+    schema: { tags: ['guidance'], summary: 'Is an offline pack still valid? (devices check when back online)', params: z.object({ packRef: z.string() }) },
+  }, (req) => packStatus(svc(req), req.params.packRef));
+
+  // ---------------------------------------------------------------- content pipeline (ADR-0005)
+  const pageSchema = z.object({ page: z.number().int().min(1), text: z.string(), label: z.string().nullable().optional() });
+
+  app.get('/v1/documents', { schema: { tags: ['content'], summary: 'Licensed documents with procedure counts by status' } }, (req) => listDocuments(svc(req)));
+
+  app.post('/v1/documents', {
+    schema: {
+      tags: ['content'], summary: 'Register a licensed document: metadata, PDF (base64, optional) and page text (optional)',
+      body: z.object({ meta: RegisterDocumentSchema, pdfBase64: z.string().optional(), pages: z.array(pageSchema).max(2000).optional() }),
+    },
+  }, async (req, reply) => {
+    const pdf = req.body.pdfBase64 ? new Uint8Array(Buffer.from(req.body.pdfBase64, 'base64')) : undefined;
+    if (pdf && Buffer.from(pdf.subarray(0, 5)).toString('latin1') !== '%PDF-') throw new AppError('VALIDATION', 'pdfBase64 is not a PDF');
+    const r = await registerDocument(svc(req), { meta: req.body.meta, pdf, pages: req.body.pages });
+    reply.code(r.duplicate ? 200 : 201);
+    return r;
+  });
+
+  app.put('/v1/documents/:id/pages', {
+    schema: { tags: ['content'], summary: 'Replace a document\'s page text (ground truth for verbatim checks)', params: z.object({ id: z.uuid() }), body: z.object({ pages: z.array(pageSchema).min(1).max(2000) }) },
+  }, (req) => storePages(svc(req), req.params.id, req.body.pages));
+
+  app.get('/v1/documents/:id/pages/:page', {
+    schema: { tags: ['content'], summary: 'One page of a licensed document (text layer)', params: z.object({ id: z.uuid(), page: z.coerce.number().int().min(1) }) },
+  }, (req) => getPage(svc(req), req.params.id, req.params.page));
+
+  app.get('/v1/documents/:id/file', {
+    schema: { tags: ['content'], summary: 'The source PDF (licence-checked, audited). Open at #page=N', params: z.object({ id: z.uuid() }) },
+  }, async (req, reply) => {
+    const f = await getDocumentFile(svc(req), req.params.id);
+    reply.header('content-type', 'application/pdf').header('content-disposition', `inline; filename="${f.filename}"`).header('cache-control', 'private, no-store');
+    return reply.send(Buffer.from(f.data));
+  });
+
+  app.post('/v1/documents/:id/extractions', {
+    schema: {
+      tags: ['content'], summary: 'Submit an extraction (from Claude or keyed by hand); creates draft procedures with check reports',
+      params: z.object({ id: z.uuid() }),
+      body: z.object({
+        extraction: ExtractedDocumentSchema,
+        run: z.object({
+          model: z.string(), mode: z.enum(['sync', 'batch', 'import']), pageFrom: z.number().int().nullable().optional(), pageTo: z.number().int().nullable().optional(),
+          inputTokens: z.number().int().nullable().optional(), outputTokens: z.number().int().nullable().optional(), cacheReadTokens: z.number().int().nullable().optional(),
+        }).optional(),
+      }),
+    },
+  }, (req) => submitExtraction(svc(req), { documentId: req.params.id, extraction: req.body.extraction, run: req.body.run }));
+
+  app.get('/v1/content/review-queue', {
+    schema: { tags: ['content'], summary: 'Procedures awaiting the foreman: drafts, in review, and live ones with open flags', querystring: z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) }) },
+  }, (req) => reviewQueue(svc(req), req.query.limit));
+
+  app.get('/v1/procedures/:id/review', {
+    schema: { tags: ['content'], summary: 'Review screen: steps, check report, cited page text, flags and history', params: z.object({ id: z.uuid() }) },
+  }, (req) => reviewDetail(svc(req), req.params.id));
+
+  app.patch('/v1/procedures/:id/steps/:seq', {
+    schema: {
+      tags: ['content'], summary: 'Fix a step; re-runs checks and sends the procedure back to review',
+      params: z.object({ id: z.uuid(), seq: z.coerce.number().int().min(1) }), body: StepEditSchema.extend({ notes: z.string().optional() }),
+    },
+  }, (req) => {
+    const { notes, ...edit } = req.body;
+    return editStep(svc(req), req.params.id, req.params.seq, edit, notes);
+  });
+
+  app.post('/v1/procedures/:id/review', {
+    schema: {
+      tags: ['content'], summary: 'Foreman decision: approve (publish), reject or withdraw',
+      params: z.object({ id: z.uuid() }), body: z.object({ decision: z.enum(['approve', 'reject', 'withdraw']), notes: z.string().max(2000).optional() }),
+    },
+  }, (req) => reviewProcedure(svc(req), req.params.id, req.body));
+
+  app.post('/v1/procedures/:id/flags', {
+    schema: {
+      tags: ['content'], summary: 'Engineer flags a step that doesn\'t match the machine',
+      params: z.object({ id: z.uuid() }), body: z.object({ stepSeq: z.number().int().min(1).optional(), message: z.string().min(1).max(2000) }),
+    },
+  }, async (req, reply) => {
+    reply.code(201);
+    return flagStep(svc(req), req.params.id, req.body);
+  });
+
+  app.post('/v1/content/links', {
+    schema: { tags: ['content'], summary: 'Add a manufacturer-portal deep link (we store the link, never the content)', body: DocumentLinkSchema },
+  }, async (req, reply) => {
+    reply.code(201);
+    return addDocumentLink(svc(req), req.body);
+  });
+
+  // ---------------------------------------------------------------- parts finder (ADR-0003)
+  app.get('/v1/enquiries', {
+    schema: { tags: ['parts-finder'], summary: 'Enquiry queue: stopped machines first, then callbacks by due time', querystring: z.object({ include: z.enum(['active', 'all']).default('active') }) },
+  }, (req) => listEnquiries(svc(req), { include: req.query.include }));
+
+  app.post('/v1/enquiries', {
+    schema: { tags: ['parts-finder'], summary: 'Open an enquiry from what the customer said; the parts agent takes the first turn', body: OpenEnquirySchema },
+  }, async (req, reply) => {
+    reply.code(201);
+    return openEnquiry(svc(req), req.body);
+  });
+
+  app.get('/v1/enquiries/:id', {
+    schema: { tags: ['parts-finder'], summary: "Enquiry with conversation, machine and the agent's checked candidates", params: z.object({ id: z.uuid() }) },
+  }, (req) => getEnquiry(svc(req), req.params.id));
+
+  app.post('/v1/enquiries/:id/messages', {
+    schema: { tags: ['parts-finder'], summary: 'Record what the customer said next; the agent takes another turn', params: z.object({ id: z.uuid() }), body: z.object({ body: z.string().min(1).max(4000) }) },
+  }, (req) => addCustomerMessage(svc(req), req.params.id, req.body.body));
+
+  app.post('/v1/enquiries/:id/replies', {
+    schema: { tags: ['parts-finder'], summary: "Send a reply to the customer (the agent's draft, edited or not)", params: z.object({ id: z.uuid() }), body: z.object({ body: z.string().min(1).max(4000) }) },
+  }, (req) => sendReply(svc(req), req.params.id, req.body.body));
+
+  app.post('/v1/enquiries/:id/callback', {
+    schema: { tags: ['parts-finder'], summary: 'Hand over to a person: 15 minutes for a stopped machine, otherwise 1 hour', params: z.object({ id: z.uuid() }), body: z.object({ reason: z.string().min(3).max(500), assignee: z.string().max(80).optional() }) },
+  }, (req) => requestCallback(svc(req), req.params.id, req.body));
+
+  app.post('/v1/enquiries/:id/resolve', {
+    schema: { tags: ['parts-finder'], summary: 'Close with the part that was right; teaches fitment for the machine model', params: z.object({ id: z.uuid() }), body: z.object({ partNumber: z.string().min(1), make: z.string().optional(), notes: z.string().max(1000).optional() }) },
+  }, (req) => resolveEnquiry(svc(req), req.params.id, req.body));
+
   // ---------------------------------------------------------------- integrations
+  app.get('/v1/integrations/sources', { schema: { tags: ['integrations'], summary: 'Registered data sources with load history' } }, (req) => listDataSources(svc(req)));
+
+  app.post('/v1/integrations/fitment', {
+    schema: {
+      tags: ['integrations'], summary: 'Import fitment from a licensed parts book / EPC export (dry run recommended first)',
+      body: z.object({ options: FitmentImportSchema, content: z.string().min(1), sourceName: z.string().min(1), dryRun: z.boolean().default(true) }),
+    },
+  }, (req) => importFitment(svc(req), req.body));
+
+  app.post('/v1/integrations/fitment/infer', {
+    schema: { tags: ['integrations'], summary: 'Propose unverified fitment from sales history', body: z.object({ minInvoices: z.number().int().min(2).max(50).default(3) }) },
+  }, (req) => inferFitmentFromSales(svc(req), req.body));
+
   app.post('/v1/integrations/price-files', {
     schema: {
       tags: ['integrations'], summary: 'Import a supplier price file (dry run recommended first)',
@@ -141,7 +317,7 @@ export async function registerRoutes(app: App, deps: AppDeps) {
 
   app.post('/v1/integrations/ibcos/import', {
     schema: {
-      tags: ['integrations'], summary: 'Import an Ibcos Gold export (customers, parts or stock)',
+      tags: ['integrations'], summary: 'Import an Ibcos Gold export (customers, parts, stock, machines or sales history)',
       body: z.object({ options: LegacyImportSchema, content: z.string().min(1), sourceName: z.string().min(1), dryRun: z.boolean().default(true) }),
     },
   }, (req) => importLegacyFile(svc(req), req.body));

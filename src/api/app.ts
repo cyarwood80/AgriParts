@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+import fastifyStatic from '@fastify/static';
+import { fileURLToPath } from 'node:url';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { and, eq } from 'drizzle-orm';
 import {
@@ -114,6 +116,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   });
 
   app.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
+
+  // ---- web UI (static, no build step; talks to /v1 like any other client) --
+  await app.register(fastifyStatic, { root: fileURLToPath(new URL('../../web/', import.meta.url)), prefix: '/app/', decorateReply: false });
+  app.get('/', { schema: { hide: true } }, async (_req, reply) => reply.redirect('/app/'));
+  app.get('/app', { schema: { hide: true } }, async (_req, reply) => reply.redirect('/app/'));
 
   // ---- MCP over Streamable HTTP (stateless: one server per request) -------
   app.post('/mcp', { schema: { hide: true } }, async (req: FastifyRequest, reply: FastifyReply) => {

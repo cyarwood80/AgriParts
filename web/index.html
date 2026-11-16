@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#15191C">
+  <title>Linchpin</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,600;112,700;125,800&amp;family=Inter:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@500;600&amp;display=swap">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="demo-banner" role="note">
+    Demo data: every make, part, customer and manual extract here is invented. Specs are not real. Never use them on a machine.
+  </div>
+  <div id="shell" class="shell">
+    <header class="topbar">
+      <a class="brand" href="#/desk"><span class="dealer">Demo Agri</span><span class="powered">powered by <span class="wordmark">linchpin</span></span></a>
+      <nav class="topnav" aria-label="Main">
+        <a href="#/desk" data-nav="desk">Find a part <span id="enquiry-count" class="count" hidden></span></a>
+        <a href="#/field" data-nav="field">Field guide</a>
+        <a href="#/review" data-nav="review">Content review <span id="review-count" class="count" hidden></span></a>
+        <span class="sep" aria-hidden="true"></span>
+        <a href="#/counter" data-nav="counter" class="more">Counter</a>
+        <a href="#/orders" data-nav="orders" class="more">Orders</a>
+        <a href="#/insights" data-nav="insights" class="more">Insights</a>
+      </nav>
+      <div class="topbar-foot">
+        <span id="conn" class="conn"></span>
+        <button id="signout" class="link-btn" type="button">Sign out</button>
+      </div>
+    </header>
+    <main id="view" class="view" tabindex="-1"></main>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }</script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
