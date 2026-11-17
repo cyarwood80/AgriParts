@@ -60,6 +60,9 @@ async function route() {
   document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === (nav === 'teardown' || nav === 'job' ? 'field' : nav)));
   document.body.classList.toggle('field-mode', nav === 'field');
   document.body.classList.toggle('find-mode', nav === 'find');
+  // The photograph behind the page: dawn on the home page, a working field while you describe it, the engine bay on the part.
+  const scene = /^#\/find\/?$/.test(hash) ? 'dawn' : hash.startsWith('#/find/') ? 'field' : hash.startsWith('#/part/') ? 'engine' : nav === 'field' || nav === 'review' ? 'workshop' : null;
+  if (scene) document.body.dataset.scene = scene; else delete document.body.dataset.scene;
   document.querySelector('.more-menu')?.removeAttribute('open');
   document.body.classList.toggle('desk-mode', nav === 'desk' || nav === 'teardown');
   document.body.classList.toggle('job-mode', nav === 'job');

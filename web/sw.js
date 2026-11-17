@@ -1,7 +1,7 @@
 // Keeps the app shell available offline so saved job packs open in a field
 // with no signal. API responses are never cached here: packs live in local
 // storage with their own licence expiry.
-const CACHE = 'linchpin-shell-v7';
+const CACHE = 'linchpin-shell-v8';
 const SHELL = ['./', 'index.html', 'app.css', 'icon.svg', 'manifest.webmanifest', 'js/app.js', 'js/lib.js', 'js/counter.js', 'js/orders.js', 'js/insights.js', 'js/field.js', 'js/review.js', 'js/desk.js', 'js/job.js', 'js/explode.js', 'js/diagram.js', 'js/find.js', 'js/model3d.js'];
 
 self.addEventListener('install', (e) => {

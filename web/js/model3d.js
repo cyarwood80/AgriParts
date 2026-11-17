@@ -196,6 +196,7 @@ const FIT = /\b(fit|refit|install|screw on|tighten|torque|reassemble|replace the
 export async function mount(container, model, { partNumber, onPick } = {}) {
   const T = await import('three');
   const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+  const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js');
   const def = MODELS[model.key];
   const parts = def.parts.map((p, i) => ({ ...p, n: i + 1, pn: p.key === model.focus && partNumber ? partNumber : p.pn ?? null }));
 
@@ -207,6 +208,9 @@ export async function mount(container, model, { partNumber, onPick } = {}) {
   const renderer = new T.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.toneMapping = T.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = T.PCFSoftShadowMap;
   stage.appendChild(renderer.domElement);
   renderer.domElement.setAttribute('aria-label', `${def.title}. Drag to turn, scroll to zoom.`);
   const scene = new T.Scene();
@@ -221,18 +225,31 @@ export async function mount(container, model, { partNumber, onPick } = {}) {
   controls.autoRotateSpeed = 0.6;
   controls.addEventListener('start', () => { controls.autoRotate = false; });
 
-  scene.add(new T.HemisphereLight(0xffffff, 0x9aa69f, 1.5));
-  const key = new T.DirectionalLight(0xffffff, 2.2);
-  key.position.set(5, 8, 6);
-  scene.add(key);
-  const rim = new T.DirectionalLight(0xcfe9df, 1.0);
+  // Studio lighting: an environment for reflections, a soft key light that casts shadows, a cool rim.
+  const pmrem = new T.PMREMGenerator(renderer);
+  const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environment = envTex;
+  scene.add(new T.HemisphereLight(0xffffff, 0x2a3530, 0.35));
+  const key = new T.DirectionalLight(0xfff4e6, 2.4);
+  key.position.set(4, 9, 5);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.camera.left = -6; key.shadow.camera.right = 6; key.shadow.camera.top = 6; key.shadow.camera.bottom = -6;
+  key.shadow.camera.near = 1; key.shadow.camera.far = 30;
+  key.shadow.radius = 6;
+  key.shadow.bias = -0.0004;
+  key.target.position.set(...def.target);
+  scene.add(key, key.target);
+  const rim = new T.DirectionalLight(0x9fe8c8, 1.1);
   rim.position.set(-6, 3, -5);
   scene.add(rim);
 
   const meshes = [];
   const lineMat = new T.LineBasicMaterial({ color: 0x14201b, transparent: true, opacity: 0.35 });
   function add(geom, k, parent, pos = [0, 0, 0], rot = [0, 0, 0]) {
-    const mesh = new T.Mesh(geom, new T.MeshStandardMaterial({ color: 0xb9c2bd, roughness: 0.5, metalness: 0.45 }));
+    const mesh = new T.Mesh(geom, new T.MeshPhysicalMaterial({ color: 0xb9c2bd, roughness: 0.35, metalness: 0.85, envMapIntensity: 1.1 }));
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     mesh.position.set(...pos);
     mesh.rotation.set(...rot);
     mesh.userData.key = k;
@@ -262,6 +279,12 @@ export async function mount(container, model, { partNumber, onPick } = {}) {
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(def.target[0], def.floor ?? -1.9, def.target[2]);
   scene.add(floor);
+  // Real cast shadows on an invisible ground.
+  const ground = new T.Mesh(new T.PlaneGeometry(40, 40), new T.ShadowMaterial({ opacity: 0.38 }));
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.set(def.target[0], (def.floor ?? -1.9) + 0.001, def.target[2]);
+  ground.receiveShadow = true;
+  scene.add(ground);
 
   labels.innerHTML = parts.map((p) => `<button type="button" class="m3d-callout${p.key === model.focus ? ' is-focus' : ''}" data-key="${p.key}" tabindex="-1"><span class="m3d-n">${p.n}</span><span class="m3d-tag">${p.pn ? `<b>${p.pn}</b> ` : ''}${p.name}</span></button>`).join('');
 
@@ -282,13 +305,20 @@ export async function mount(container, model, { partNumber, onPick } = {}) {
         mat.metalness = 0;
         mat.roughness = 1;
         m.edges.material = lineMatManual;
+        mat.clearcoat = 0;
+        m.edges.visible = true;
+        mat.emissive.set(0x000000);
       } else {
-        mat.color.set(hot ? 0x1f8a6a : m.key === 'block' || m.key === 'housing' ? 0x7d8a84 : m.key === 'rotor' || m.key === 'other' ? 0x9aa6a0 : 0xc4ccc7);
-        mat.metalness = hot ? 0.25 : 0.5;
-        mat.roughness = hot ? 0.45 : 0.5;
-        m.edges.material = lineMat;
+        // Finishes: the part in gloss paint, castings dark and satin, painted frame, bright steel for fasteners.
+        const cast = m.key === 'block' || m.key === 'housing' || m.key === 'head';
+        const frame = m.key === 'rotor' || m.key === 'other' || m.key === 'lug' || m.key === 'bearing' || m.key === 'cover';
+        if (hot) { mat.color.set(0x0f9a63); mat.metalness = 0.25; mat.roughness = 0.3; mat.clearcoat = 1; mat.clearcoatRoughness = 0.06; }
+        else if (cast) { mat.color.set(0x56605b); mat.metalness = 0.65; mat.roughness = 0.55; mat.clearcoat = 0; }
+        else if (frame) { mat.color.set(0x6b736f); mat.metalness = 0.35; mat.roughness = 0.42; mat.clearcoat = 0.6; mat.clearcoatRoughness = 0.25; }
+        else { mat.color.set(0xc9d0cc); mat.metalness = 0.95; mat.roughness = 0.22; mat.clearcoat = 0; }
+        mat.emissive.set(hot ? 0x021a10 : 0x000000);
+        m.edges.visible = false;
       }
-      mat.emissive?.set(hot && style !== 'manual' ? 0x0b3d2f : 0x000000);
     }
     labels.querySelectorAll('.m3d-callout').forEach((c) => c.classList.toggle('is-on', c.dataset.key === picked));
   }
@@ -382,6 +412,8 @@ export async function mount(container, model, { partNumber, onPick } = {}) {
       renderer.setAnimationLoop(null);
       ro.disconnect();
       controls.dispose();
+      envTex.dispose();
+      pmrem.dispose();
       renderer.dispose();
     },
   };
