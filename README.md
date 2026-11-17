@@ -58,6 +58,17 @@ Or against a real Postgres server:
 TEST_PG_URL=postgres://postgres@localhost:5432/postgres npm run test:pg
 ```
 
+## Find a part: the live conversation
+
+The Find a part chat runs on Claude through this computer's Claude Code sign-in (the Claude Agent SDK), so it needs no API key. Claude gets our catalogue and parts-book tools, plus web search for machines and parts we hold no data for. Anything from the web is shown as **unconfirmed** with its source, and is never sold from without the parts desk confirming it.
+
+1. Sign in to Claude Code once on this computer (it opens a browser):
+   `npx @anthropic-ai/claude-code`, then type `/login`.
+   Or make a long-lived token with `npx @anthropic-ai/claude-code setup-token` and put it in `.env` as `CLAUDE_CODE_OAUTH_TOKEN=`.
+2. Restart the server. The chat shows **Claude · live** when it's connected.
+
+Not signed in, it falls back to the offline matcher (our own records only) and says so on screen. `PARTS_AGENT_ENGINE=api` uses `ANTHROPIC_API_KEY` instead; `rules` forces the offline matcher.
+
 ## Connect Claude (or any MCP client)
 
 Claude Desktop / Claude Code over stdio:

@@ -40,8 +40,22 @@ export interface AgentPick {
   matchedBy: 'number' | 'described' | 'machine' | 'history';
 }
 
+/** A part found on the web for a machine or part we hold no data for. Never supplied as-is. */
+export interface WebFinding {
+  make: string;
+  partNumber: string;
+  description: string;
+  /** Why the agent thinks this is it, and what still needs confirming (serial break, year). */
+  note: string;
+  source: { title: string; url: string };
+}
+
 export interface AgentProposal {
-  engine: 'claude' | 'rules';
+  engine: 'claude' | 'claude-local' | 'rules';
+  /** The machine as the user described it, when it isn't in our records (e.g. "Valtra T214"). */
+  machineText?: string | null;
+  /** Unverified web findings; only URLs the agent actually fetched or searched survive. */
+  web?: WebFinding[];
   machineSerial: string | null;
   picks: AgentPick[];
   question: string | null;
@@ -51,7 +65,10 @@ export interface AgentProposal {
   notes: string[];
 }
 
+/** Progress for the screen while the agent works ("Searching the web for ..."). */
+export type AgentProgress = (status: string) => void;
+
 export interface PartsAgentEngine {
-  readonly name: 'claude' | 'rules';
-  propose(input: AgentInput): Promise<AgentProposal>;
+  readonly name: 'claude' | 'claude-local' | 'rules';
+  propose(input: AgentInput, onProgress?: AgentProgress): Promise<AgentProposal>;
 }

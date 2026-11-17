@@ -17,6 +17,9 @@ import type { AccountingAdapter } from './integrations/accounting/types.js';
 import { defaultOrderingRegistry } from './integrations/ordering/adapters.js';
 import { startDispatcher } from './integrations/webhooks/dispatcher.js';
 
+// Settings from .env when present (never committed). Variables already set win.
+try { process.loadEnvFile(); } catch { /* no .env */ }
+
 const config = loadConfig();
 const database = await openDatabase(config.databaseUrl, { migrate: config.autoMigrate });
 

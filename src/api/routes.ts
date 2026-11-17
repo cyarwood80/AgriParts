@@ -12,6 +12,7 @@ import {
 import { listDataSources } from '../services/data-sources.js';
 import {
   addCustomerMessage, getEnquiry, listEnquiries, OpenEnquirySchema, openEnquiry, requestCallback, resolveEnquiry, sendReply,
+  findEngineStatus, findPart, FindPartSchema, partCard,
 } from '../services/parts-finder.js';
 import { deliveryStats, listEvents, newWebhookSecret } from '../integrations/webhooks/dispatcher.js';
 import { AppError } from '../lib/errors.js';
@@ -263,6 +264,35 @@ export async function registerRoutes(app: App, deps: AppDeps) {
   });
 
   // ---------------------------------------------------------------- parts finder (ADR-0003)
+  app.post('/v1/find', {
+    schema: { tags: ['parts-finder'], summary: 'Guided find: machine + what the user said -> checked candidates (nothing stored)', body: FindPartSchema },
+  }, (req) => findPart(svc(req), req.body));
+
+  app.get('/v1/find/engine', { schema: { tags: ['parts-finder'], summary: 'Which engine answers a guided find, and whether it is connected' } }, async () => findEngineStatus());
+
+  // Same as POST /v1/find, as server-sent events: "status" while the agent works, then "result" (or "error").
+  app.post('/v1/find/stream', {
+    schema: { tags: ['parts-finder'], summary: 'Guided find with live progress (text/event-stream)', body: FindPartSchema },
+  }, async (req, reply) => {
+    reply.hijack();
+    const out = reply.raw;
+    out.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    const send = (event: string, data: unknown) => { if (!out.writableEnded) out.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+    const ping = setInterval(() => { if (!out.writableEnded) out.write(': ping\n\n'); }, 15_000);
+    try {
+      send('result', await findPart(svc(req), req.body, (status) => send('status', { status })));
+    } catch (e) {
+      send('error', { message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      clearInterval(ping);
+      out.end();
+    }
+  });
+
+  app.get('/v1/parts/:make/:partNumber/card', {
+    schema: { tags: ['parts'], summary: 'Part page: evidence, fitment for a machine, price, stock and fitting guide', params: z.object({ make: z.string(), partNumber: z.string() }), querystring: z.object({ serial: z.string().optional() }) },
+  }, (req) => partCard(svc(req), { make: req.params.make, partNumber: req.params.partNumber, serial: req.query.serial }));
+
   app.get('/v1/enquiries', {
     schema: { tags: ['parts-finder'], summary: 'Enquiry queue: stopped machines first, then callbacks by due time', querystring: z.object({ include: z.enum(['active', 'all']).default('active') }) },
   }, (req) => listEnquiries(svc(req), { include: req.query.include }));

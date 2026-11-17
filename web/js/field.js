@@ -2,6 +2,7 @@
 // manufacturer procedures, saved to the device as an expiring job pack so it
 // works in a field with no signal.
 import { api, date, debounce, errorBox, html, loading, qs, relDays, store, toast } from './lib.js';
+import { bindDiagram, diagramFigure, numberedParts } from './diagram.js';
 
 // ---- local packs ----------------------------------------------------------
 const packs = {
@@ -323,6 +324,7 @@ function withheldBlock(list, title = 'Not shown') {
 
 function renderProcedure(pr, prog, jobHref) {
   const done = new Set(prog[pr.id] ?? []);
+  const numbered = numberedParts(pr);
   const pctDone = pr.steps.length ? Math.round((done.size / pr.steps.length) * 100) : 0;
   return html`
     <article class="proc card" data-proc="${pr.id}" data-doc="${pr.source.documentId ?? ''}">
@@ -344,11 +346,13 @@ function renderProcedure(pr, prog, jobHref) {
 
       ${pr.safety.length ? html`<div class="safety"><strong>⚠ Safety first</strong><ul>${pr.safety.map((s) => html`<li>${s}</li>`)}</ul></div>` : ''}
 
+      ${pr.parts.length ? diagramFigure(pr, numbered) : ''}
+
       <div class="proc-cols">
         ${pr.tools.length ? html`<div><h3>Tools</h3><ul class="plain tick">${pr.tools.map((t) => html`<li>${t}</li>`)}</ul></div>` : ''}
         <div>
           <h3>Parts</h3>
-          <ul class="plain">${pr.parts.map((x) => html`<li><span class="role role-${x.role}">${ROLE[x.role] ?? x.role}</span> <span class="mono">${x.partNumber}</span> × ${x.qty} <span class="muted small">${x.description ?? ''}</span>${x.available != null ? html` <span class="small ${x.available >= x.qty ? 'ok' : 'bad'}">(${x.available} in stock)</span>` : ''}</li>`)}</ul>
+          <ul class="plain dg-parts">${numbered.map((x) => html`<li data-n="${x.n}"><span class="dg-n">${x.n}</span><span class="role role-${x.role}">${ROLE[x.role] ?? x.role}</span> <span class="mono">${x.partNumber}</span> × ${x.qty} <span class="muted small">${x.description ?? ''}</span>${x.available != null ? html` <span class="small ${x.available >= x.qty ? 'ok' : 'bad'}">(${x.available} in stock)</span>` : ''}</li>`)}</ul>
         </div>
       </div>
 
@@ -381,6 +385,7 @@ function bindSteps(el, key) {
       e.preventDefault();
       togglePage(card, b.closest('.step'), Number(b.dataset.page));
     }));
+    bindDiagram(card);
     card.querySelector('[data-flag]')?.addEventListener('click', () => toggleFlagForm(card));
     card.querySelectorAll('input[data-seq]').forEach((cb) => cb.addEventListener('change', () => {
       const prog = progress.get(key);

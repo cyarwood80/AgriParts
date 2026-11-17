@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { partFitment } from '../src/db/schema.js';
 import { pickMachine, queryWords, splitQuestion } from '../src/integrations/parts-agent/rules.js';
 import {
-  addCustomerMessage, getEnquiry, listEnquiries, openEnquiry, requestCallback, resolveEnquiry, sendReply,
+  addCustomerMessage, findPart, getEnquiry, listEnquiries, openEnquiry, partCard, requestCallback, resolveEnquiry, sendReply,
 } from '../src/services/parts-finder.js';
 import { setupTestEnv, type TestEnv } from './helpers.js';
 
@@ -111,5 +111,47 @@ describe('enquiries', () => {
 
   it('needs enquiries:write to work an enquiry', async () => {
     await expect(openEnquiry(env.ctx(['parts:read']), { message: 'oil filter' })).rejects.toThrow(/enquiries:write/);
+  });
+});
+
+describe('guided find (nothing stored)', () => {
+  it('machine + description gives the right part with evidence, price and the fitting guide', async () => {
+    const r = await findPart(env.ctx(), { serial: 'ACM165-K004417', messages: ['oil filter'] });
+    expect(r.machine?.model).toBe('AT-165');
+    const best = r.candidates.find((c) => c.role === 'best')!;
+    expect(best.partNumber).toBe('ACM-10044');
+    expect(best.guide?.code).toBe('WM-AT-02-04');
+    expect(best.stock?.length).toBeGreaterThan(0);
+    expect(r.needsPerson).toBeNull();
+  });
+
+  it('two parts fit: asks one question, and the answer settles it', async () => {
+    const q = await findPart(env.ctx(), { serial: 'FM55-20219', messages: ['flail hammers'] });
+    expect(q.question).toBe('80mm or 100mm?');
+    expect(q.candidates.filter((c) => c.role === 'option')).toHaveLength(2);
+    const a = await findPart(env.ctx(), { serial: 'FM55-20219', messages: ['flail hammers', '80mm'] });
+    expect(a.candidates.find((c) => c.role === 'best')?.partNumber).toBe('DH-10442');
+  });
+
+  it('takes a conversation with its own replies, and works without a machine', async () => {
+    const r = await findPart(env.ctx(), { serial: 'FM55-20219', messages: [{ role: 'user', body: 'flail hammers' }, { role: 'assistant', body: '80mm or 100mm?' }, { role: 'user', body: '100mm' }] });
+    expect(r.candidates.find((c) => c.role === 'best')?.partNumber).toBe('DH-10460');
+    const open = await findPart(env.ctx(), { messages: ['oil filter for a Valtra T214'] });
+    expect(open.machine).toBeNull();
+    expect(open.engine).toBe('rules');
+    expect(open.reply).toBeTruthy();
+  });
+
+  it('safety-critical parts are flagged for the parts desk', async () => {
+    const r = await findPart(env.ctx(), { serial: 'ACM165-K004417', messages: ['top link'] });
+    expect(r.needsPerson).toMatch(/safety-critical/);
+  });
+
+  it('part card says whether it fits the machine', async () => {
+    const yes = await partCard(env.ctx(), { make: 'DH', partNumber: 'DH-10442', serial: 'FM55-20219' });
+    expect(yes.fitsMachine).toBe(true);
+    expect(yes.part.guide?.code).toBe('OM-FM55-06-01');
+    const no = await partCard(env.ctx(), { make: 'DH', partNumber: 'DH-10442', serial: 'ACM165-K004417' });
+    expect(no.fitsMachine).toBe(false);
   });
 });

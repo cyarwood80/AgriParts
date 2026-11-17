@@ -6,6 +6,7 @@ import * as field from './field.js';
 import * as review from './review.js';
 import * as desk from './desk.js';
 import * as job from './job.js';
+import * as find from './find.js';
 
 const view = document.getElementById('view');
 let countLoaded = false;
@@ -19,10 +20,14 @@ function takeKeyFromHash() {
   if (!m) return;
   setKey(m[1]);
   countLoaded = false;
-  history.replaceState(null, '', `${location.pathname}#/desk`);
+  history.replaceState(null, '', `${location.pathname}#/find`);
 }
 
 const routes = [
+  [/^#\/find$/, () => find.renderStart(view), 'find'],
+  [/^#\/find\/ask(?:\?q=(.*))?$/, (p) => find.renderAsk(view, p[1] ? decodeURIComponent(p[1]) : ''), 'find'],
+  [/^#\/find\/m\/(.+)$/, (p) => find.renderMachine(view, decodeURIComponent(p[1])), 'find'],
+  [/^#\/part\/([^/]+)\/([^?]+)(?:\?serial=(.*))?$/, (p) => find.renderPart(view, decodeURIComponent(p[1]), decodeURIComponent(p[2]), p[3] && decodeURIComponent(p[3])), 'find'],
   [/^#\/desk\/new$/, () => desk.render(view, 'new'), 'desk'],
   [/^#\/desk(?:\/([0-9a-f-]{36}))?$/, (p) => desk.render(view, p[1]), 'desk'],
   [/^#\/field\/job\/([^/]+)\/([^/]+)\/([0-9a-f-]{36})(?:\?serial=(.*))?$/, (p) => job.renderOnline(view, decodeURIComponent(p[1]), decodeURIComponent(p[2]), p[3], p[4] && decodeURIComponent(p[4])), 'job'],
@@ -48,12 +53,14 @@ async function route() {
   takeKeyFromHash();
   if (!getKey()) return renderSignIn();
   document.getElementById('shell').classList.remove('signed-out');
-  const hash = location.hash || '#/desk';
+  const hash = location.hash || '#/find';
   const hit = routes.find(([re]) => re.test(hash));
-  if (!hit) { location.hash = '#/desk'; return; }
+  if (!hit) { location.hash = '#/find'; return; }
   const [re, fn, nav] = hit;
   document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === (nav === 'teardown' || nav === 'job' ? 'field' : nav)));
   document.body.classList.toggle('field-mode', nav === 'field');
+  document.body.classList.toggle('find-mode', nav === 'find');
+  document.querySelector('.more-menu')?.removeAttribute('open');
   document.body.classList.toggle('desk-mode', nav === 'desk' || nav === 'teardown');
   document.body.classList.toggle('job-mode', nav === 'job');
   if (typeof cleanup === 'function') cleanup();
@@ -110,7 +117,7 @@ addEventListener('hashchange', route);
 addEventListener('online', updateConn);
 addEventListener('offline', updateConn);
 addEventListener('keydown', (e) => {
-  const go = { F2: '#/desk', F3: '#/field', F4: '#/counter' }[e.key];
+  const go = { F1: '#/find', F2: '#/desk', F3: '#/field', F4: '#/counter' }[e.key];
   if (go) { e.preventDefault(); location.hash = go; }
 });
 

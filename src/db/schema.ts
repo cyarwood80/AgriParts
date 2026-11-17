@@ -1099,7 +1099,7 @@ export interface EnquiryCandidate {
   safetyCritical?: boolean;
 }
 export interface EnquiryResult {
-  engine: 'claude' | 'rules';
+  engine: 'claude' | 'claude-local' | 'rules';
   /** high | medium | low */
   confidence: string;
   /** Draft reply for the parts person to send (or edit). */

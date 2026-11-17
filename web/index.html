@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#15191C">
-  <title>Linchpin</title>
+  <meta name="theme-color" content="#0E5E4E">
+  <title>Demo Agri Parts</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,600;112,700;125,800&amp;family=Inter:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@500;600&amp;display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,600;112,700;125,800&amp;family=Inter:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500;600&amp;display=swap">
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -18,15 +18,23 @@
   </div>
   <div id="shell" class="shell">
     <header class="topbar">
-      <a class="brand" href="#/desk"><span class="dealer">Demo Agri</span><span class="powered">powered by <span class="wordmark">linchpin</span></span></a>
+      <a class="brand" href="#/find" aria-label="Demo Agri parts, home">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30"><rect width="32" height="32" rx="8" fill="#0E5E4E"/><path d="M9 22V10M9 22h8M19 10v12M19 10l5 6-5 6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span class="brand-text"><span class="dealer">Demo Agri</span><span class="powered">Parts &amp; service · powered by <span class="wordmark">linchpin</span></span></span>
+      </a>
       <nav class="topnav" aria-label="Main">
-        <a href="#/desk" data-nav="desk">Find a part <span id="enquiry-count" class="count" hidden></span></a>
+        <a href="#/find" data-nav="find">Find a part</a>
+        <a href="#/desk" data-nav="desk">Enquiries <span id="enquiry-count" class="count" hidden></span></a>
         <a href="#/field" data-nav="field">Field guide</a>
-        <a href="#/review" data-nav="review">Content review <span id="review-count" class="count" hidden></span></a>
-        <span class="sep" aria-hidden="true"></span>
-        <a href="#/counter" data-nav="counter" class="more">Counter</a>
-        <a href="#/orders" data-nav="orders" class="more">Orders</a>
-        <a href="#/insights" data-nav="insights" class="more">Insights</a>
+        <details class="more-menu">
+          <summary>More <span id="review-count" class="count" hidden></span></summary>
+          <div class="more-list">
+            <a href="#/review" data-nav="review">Content review</a>
+            <a href="#/counter" data-nav="counter">Counter</a>
+            <a href="#/orders" data-nav="orders">Orders</a>
+            <a href="#/insights" data-nav="insights">Insights</a>
+          </div>
+        </details>
       </nav>
       <div class="topbar-foot">
         <span id="conn" class="conn"></span>

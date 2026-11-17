@@ -19,7 +19,7 @@ import type { AgentInput, AgentPick, AgentProposal, PartsAgentEngine } from './t
 export const PARTS_AGENT_MODEL = 'claude-opus-5-5';
 const MAX_STEPS = 8;
 
-const SYSTEM = `You are the parts agent at a UK agricultural machinery dealer. A parts person is working a customer enquiry with you. Your job: work out exactly which part the customer needs, with evidence, or hand over to a person.
+export const SYSTEM = `You are the parts agent at a UK agricultural machinery dealer. A parts person is working a customer enquiry with you. Your job: work out exactly which part the customer needs, with evidence, or hand over to a person.
 
 Rules:
 - Only propose part numbers that a tool returned. Never invent or "correct" a number yourself.
@@ -128,10 +128,10 @@ interface SubmitInput {
 let client: Anthropic | undefined;
 
 export function claudeAvailable(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY) && process.env.PARTS_AGENT_ENGINE !== 'rules';
+  return Boolean(process.env.ANTHROPIC_API_KEY) && process.env.PARTS_AGENT_ENGINE !== 'rules' && process.env.PARTS_AGENT_ENGINE !== 'local';
 }
 
-async function runTool(input: AgentInput, name: string, args: Record<string, unknown>): Promise<unknown> {
+export async function runTool(input: AgentInput, name: string, args: Record<string, unknown>): Promise<unknown> {
   const { ctx } = input;
   const str = (k: string) => (typeof args[k] === 'string' && (args[k] as string).trim() ? (args[k] as string).trim() : undefined);
   switch (name) {
@@ -168,7 +168,7 @@ async function runTool(input: AgentInput, name: string, args: Record<string, unk
   }
 }
 
-function brief(input: AgentInput): string {
+export function brief(input: AgentInput): string {
   const lines = [
     `Channel: ${input.channel}. Priority: ${input.priority}. Agent turns so far: ${input.rounds}.`,
     input.customer ? `Customer: ${input.customer.name} (${input.customer.accountCode}).` : 'Customer: not on an account yet.',

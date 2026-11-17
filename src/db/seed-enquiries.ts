@@ -23,6 +23,18 @@ const HISTORY: [invoice: string, on: string, account: string, serial: string, ma
 ];
 
 export async function seedEnquiriesDemo(db: DB, tenantId: string) {
+  // Seed with the offline matcher: start-up must not wait on (or spend) a live model.
+  const engineWas = process.env.PARTS_AGENT_ENGINE;
+  process.env.PARTS_AGENT_ENGINE = 'rules';
+  try {
+    await seedEnquiries(db, tenantId);
+  } finally {
+    if (engineWas === undefined) delete process.env.PARTS_AGENT_ENGINE;
+    else process.env.PARTS_AGENT_ENGINE = engineWas;
+  }
+}
+
+async function seedEnquiries(db: DB, tenantId: string) {
   const custRows = await db.select().from(customers).where(eq(customers.tenantId, tenantId));
   const cust = Object.fromEntries(custRows.map((c) => [c.accountCode, c.id]));
   const machRows = await db.select().from(machines).where(and(eq(machines.tenantId, tenantId)));

@@ -22,8 +22,9 @@ import {
   type EnquiryCandidate, type EnquiryEvidence, type EnquiryResult,
 } from '../db/schema.js';
 import { claudeAvailable, claudeEngine } from '../integrations/parts-agent/claude.js';
+import { localAvailable, localEngine, localStatus } from '../integrations/parts-agent/local.js';
 import { rulesEngine } from '../integrations/parts-agent/rules.js';
-import type { AgentInput, AgentMachine, AgentPick, AgentProposal } from '../integrations/parts-agent/types.js';
+import type { AgentInput, AgentMachine, AgentPick, AgentProgress, AgentProposal, PartsAgentEngine } from '../integrations/parts-agent/types.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { looksLikePartNumber, normalisePartNumber } from '../lib/part-number.js';
 import { audit, nextNumber, type ServiceContext } from './context.js';
@@ -231,11 +232,12 @@ export async function runAgent(ctx: ServiceContext, id: string): Promise<Enquiry
 
   let proposal: AgentProposal;
   const extraNotes: string[] = [];
-  if (claudeAvailable()) {
+  const engine = claudeAvailable() ? claudeEngine : localAvailable() ? localEngine : null;
+  if (engine) {
     try {
-      proposal = await claudeEngine.propose(input);
+      proposal = await engine.propose(input);
     } catch (err) {
-      extraNotes.push(`Claude agent unavailable (${err instanceof Error ? err.message : String(err)}); used the offline matcher`);
+      extraNotes.push(`${engine.name === 'claude-local' ? 'Local Claude' : 'Claude agent'} unavailable (${err instanceof Error ? err.message : String(err)}); used the offline matcher`);
       proposal = await rulesEngine.propose(input);
     }
   } else proposal = await rulesEngine.propose(input);
@@ -478,4 +480,123 @@ async function handOver(ctx: ServiceContext, e: typeof enquiries.$inferSelect, r
     .where(and(eq(enquiries.id, e.id), ne(enquiries.status, 'resolved')));
   await ctx.db.insert(enquiryMessages).values({ tenantId: ctx.tenantId, enquiryId: e.id, role: 'system', body: `Handed to ${who}: ${reason}. Callback by ${hhmm(dueAt)}.` });
   await audit(ctx, 'enquiry.callback_requested', 'enquiry', e.id, { ref: e.ref, reason, assignee: who, dueAt: dueAt.toISOString() });
+}
+
+// ---------------------------------------------------------------- direct find (no enquiry)
+
+/**
+ * The guided "Find a part" flow: machine -> what the user says -> checked
+ * candidates. Same engines and the same checks as an enquiry, but nothing is
+ * stored: the user is the one looking, so there's no reply to draft and no
+ * callback. Safety-critical parts are still flagged for a person to confirm.
+ */
+export const FindPartSchema = z.object({
+  serial: z.string().trim().min(1).optional(),
+  /** The conversation, oldest first. A plain string is something the user said. */
+  messages: z
+    .array(z.union([z.string().trim().min(1).max(2000), z.object({ role: z.enum(['user', 'assistant']), body: z.string().trim().min(1).max(4000) })]))
+    .min(1)
+    .max(30),
+});
+
+/** Which engine answers a guided find, and whether it's connected. */
+export function findEngineStatus() {
+  if (claudeAvailable()) return { engine: 'claude' as const, connected: true, detail: 'Claude API' };
+  const local = localStatus();
+  if (process.env.PARTS_AGENT_ENGINE !== 'rules' && process.env.PARTS_AGENT_ENGINE !== 'api') {
+    return { engine: 'claude-local' as const, connected: local.available, detail: local.lastFailure ?? 'Claude through this computer\'s Claude Code sign-in' };
+  }
+  return { engine: 'rules' as const, connected: true, detail: 'Offline matcher' };
+}
+
+export async function findPart(ctx: ServiceContext, raw: z.input<typeof FindPartSchema>, onProgress?: AgentProgress) {
+  ctx.require('parts:read');
+  const input = FindPartSchema.parse(raw);
+  let [machine] = input.serial ? await machineRows(ctx, eq(machines.serial, input.serial)) : [];
+  if (input.serial && !machine) throw notFound('Machine', input.serial);
+  const loadCustomer = async (m: typeof machine) => (m?.customerId ? (await ctx.db.select().from(customers).where(eq(customers.id, m.customerId)))[0] : undefined);
+  let customer = await loadCustomer(machine);
+
+  const messages = input.messages.map((m) => (typeof m === 'string' ? { role: 'customer', body: m } : { role: m.role === 'user' ? 'customer' : 'assistant', body: m.body }));
+  const agentInput: AgentInput = {
+    ctx, channel: 'web', priority: 'normal',
+    customer: customer ? { id: customer.id, accountCode: customer.accountCode, name: customer.name } : null,
+    machine: machine ? asAgentMachine(machine) : null,
+    customerMachines: machine ? [asAgentMachine(machine)] : [],
+    messages,
+    rounds: messages.filter((m) => m.role === 'customer').length - 1,
+  };
+  const notes: string[] = [];
+  let proposal: AgentProposal | null = null;
+  const engines = [claudeAvailable() ? claudeEngine : null, !claudeAvailable() && localAvailable() ? localEngine : null].filter(Boolean) as PartsAgentEngine[];
+  for (const engine of engines) {
+    try {
+      proposal = await engine.propose(agentInput, onProgress);
+      break;
+    } catch (err) {
+      notes.push(`${engine.name === 'claude-local' ? 'Local Claude' : 'Claude'} unavailable (${err instanceof Error ? err.message : String(err)}); used the offline matcher`);
+    }
+  }
+  if (!proposal) {
+    onProgress?.('Checking the parts book');
+    proposal = await rulesEngine.propose(agentInput);
+  }
+
+  // The machine, if the engine identified one in our records.
+  if (!machine && proposal.machineSerial) {
+    [machine] = await machineRows(ctx, eq(machines.serial, proposal.machineSerial));
+    if (machine) customer = await loadCustomer(machine);
+    else notes.push(`Ignored machine ${proposal.machineSerial}: not in our records`);
+  }
+
+  const candidates: EnquiryCandidate[] = [];
+  const seen = new Set<string>();
+  for (const pick of proposal.picks) {
+    const c = await buildCandidate(ctx, pick, customer ?? null, machine ?? null);
+    if (!c) { notes.push(`Dropped ${pick.make} ${pick.partNumber}: not in the catalogue`); continue; }
+    const k = `${c.make}|${normalisePartNumber(c.partNumber)}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    candidates.push(c);
+  }
+  // A web finding that turns out to be in our catalogue becomes a checked candidate.
+  const web = [];
+  for (const w of proposal.web ?? []) {
+    const c = await buildCandidate(ctx, { make: w.make, partNumber: w.partNumber, role: candidates.some((x) => x.role === 'best') ? 'option' : 'best', why: w.note, matchedBy: 'described' }, customer ?? null, machine ?? null);
+    const k = c ? `${c.make}|${normalisePartNumber(c.partNumber)}` : '';
+    if (c && !seen.has(k)) { seen.add(k); candidates.push(c); } else if (!c) web.push(w);
+  }
+  const confidence = confidenceFor(candidates, Boolean(machine));
+  const safety = candidates.find((c) => c.safetyCritical);
+  const needsPerson = proposal.escalate?.reason
+    ?? (safety ? `${safety.description} is safety-critical: the parts desk confirms it before it's supplied` : null)
+    ?? (!candidates.length && !web.length && !proposal.question && !proposal.reply ? "Couldn't find a part that matches" : null);
+  return {
+    machine: machine ? { serial: machine.serial, make: machine.make, model: machine.model, kind: machine.kind, year: machine.year } : null,
+    machineText: proposal.machineText ?? null,
+    engine: proposal.engine,
+    confidence,
+    reply: proposal.reply ?? composeReply({ candidates, question: proposal.question, escalate: null, dueAt: null, machine: machine ?? null }),
+    question: proposal.question,
+    candidates,
+    web,
+    needsPerson,
+    notes: [...proposal.notes, ...notes],
+  };
+}
+
+/** Everything about one part for the part page: evidence, price, stock, guide. */
+export async function partCard(ctx: ServiceContext, input: { make: string; partNumber: string; serial?: string | undefined }) {
+  ctx.require('parts:read');
+  const [machine] = input.serial ? await machineRows(ctx, eq(machines.serial, input.serial)) : [];
+  if (input.serial && !machine) throw notFound('Machine', input.serial);
+  const [customer] = machine?.customerId ? await ctx.db.select().from(customers).where(eq(customers.id, machine.customerId)) : [];
+  const card = await buildCandidate(ctx, { make: input.make, partNumber: input.partNumber, role: 'best', why: 'Chosen from the machine', matchedBy: 'machine' }, customer ?? null, machine ?? null);
+  if (!card) throw notFound('Part', input.partNumber);
+  const fits = card.evidence.some((e) => e.kind === 'parts_book');
+  return {
+    machine: machine ? { serial: machine.serial, make: machine.make, model: machine.model, kind: machine.kind, year: machine.year, customer: customer?.name ?? null } : null,
+    fitsMachine: machine ? fits : null,
+    part: card,
+  };
 }
